@@ -39,6 +39,39 @@ class VariableAssignment:
     node: GenericNode
 
 
+@dataclass
+class InternalSink:
+    """A sink reached by a function parameter inside a function body."""
+    sink_pattern: str
+    param_indices: Set[int]  # Which param indices flow to this sink
+    line: int
+    rule_id: str
+
+
+@dataclass
+class FunctionSummary:
+    """Summary of taint behavior for a single function."""
+    name: str
+    parameters: List[str]              # Param names in order (excluding self/cls)
+    returns_taint_from: Set[int]       # Param indices whose taint flows to return
+    returns_source: bool               # Body contains a taint source flowing to return
+    source_pattern: Optional[str]
+    internal_sinks: List[InternalSink]
+    has_sanitizer: bool
+    line: int
+    end_line: int
+    node: GenericNode
+
+
+@dataclass
+class CallGraph:
+    """Call graph for functions within a single file."""
+    functions: Dict[str, GenericNode]       # func name -> FUNCTION_DEF node
+    summaries: Dict[str, FunctionSummary]   # func name -> summary
+    calls: Dict[str, Set[str]]             # caller -> callees
+    reverse: Dict[str, Set[str]]           # callee -> callers
+
+
 class TaintAnalyzer:
     """
     Performs taint analysis on an AST using TaintRule definitions.
@@ -70,19 +103,30 @@ class TaintAnalyzer:
         # Reset state for each rule
         self.tainted = {}
         self.assignments = []
-        
+
+        # Phase 0: Build call graph + generate inter-procedural summaries
+        call_graph = self._build_call_graph(ast)
+        summaries: Dict[str, FunctionSummary] = {}
+        if call_graph.functions:
+            summaries = self._generate_summaries(call_graph, rule)
+        self._current_summaries = summaries
+
         # Step 1: Collect all variable assignments
         self._collect_assignments(ast)
-        
+
         # Step 2: Find sources and mark initial tainted variables
         self._find_sources(ast, rule)
-        
-        # Step 3: Propagate taint through assignments
+
+        # Step 3: Propagate taint through assignments (now includes inter-procedural)
         self._propagate_taint(rule)
-        
+
+        # Step 3.5: Check tainted args against callee internal sinks
+        internal_findings = self._check_internal_sinks(ast, rule, summaries)
+
         # Step 4: Check sinks for tainted input
         findings = self._check_sinks(ast, rule)
-        
+        findings.extend(internal_findings)
+
         return findings
     
     def _collect_assignments(self, node: GenericNode):
@@ -203,28 +247,30 @@ class TaintAnalyzer:
         return None
     
     def _propagate_taint(self, rule: TaintRule):
-        """Propagate taint through variable assignments"""
+        """Propagate taint through variable assignments (intra + inter-procedural)"""
+        summaries = getattr(self, '_current_summaries', {})
         changed = True
         iterations = 0
         max_iterations = 100
-        
+
         while changed and iterations < max_iterations:
             changed = False
             iterations += 1
-            
+
             for assignment in self.assignments:
                 if assignment.target in self.tainted:
                     continue
-                
+
                 if self._is_assignment_sanitized(assignment, rule):
                     continue
 
+                # Part A: Direct variable propagation (existing)
                 for source_var in assignment.source_vars:
                     if source_var in self.tainted:
                         source_taint = self.tainted[source_var]
                         new_path = source_taint.propagation_path.copy()
                         new_path.append(f"Line {assignment.line}: {assignment.target} = ... {source_var} ...")
-                        
+
                         self.tainted[assignment.target] = TaintedVariable(
                             name=assignment.target,
                             source_pattern=source_taint.source_pattern,
@@ -233,6 +279,59 @@ class TaintAnalyzer:
                         )
                         changed = True
                         break
+
+                if assignment.target in self.tainted:
+                    continue
+
+                # Part B: Inter-procedural return propagation
+                if summaries:
+                    call_nodes = assignment.node.find_all(NodeKind.CALL)
+                    for call_node in call_nodes:
+                        callee = self._resolve_callee_name(call_node)
+                        if not callee or callee not in summaries:
+                            continue
+                        summary = summaries[callee]
+                        if summary.has_sanitizer:
+                            continue
+
+                        # Check if callee returns a source
+                        if summary.returns_source:
+                            self.tainted[assignment.target] = TaintedVariable(
+                                name=assignment.target,
+                                source_pattern=summary.source_pattern or "function_source",
+                                source_line=summary.line,
+                                propagation_path=[f"Source via {callee}()"],
+                            )
+                            changed = True
+                            break
+
+                        # Check if any tainted arg flows to return
+                        for idx, param_name in enumerate(summary.parameters):
+                            if idx >= len(call_node.args):
+                                continue
+                            if idx not in summary.returns_taint_from:
+                                continue
+                            arg_node = call_node.args[idx]
+                            arg_vars = self._get_referenced_variables(arg_node)
+                            for av in arg_vars:
+                                if av in self.tainted:
+                                    source_taint = self.tainted[av]
+                                    new_path = source_taint.propagation_path.copy()
+                                    new_path.append(
+                                        f"Line {assignment.line}: {assignment.target} = {callee}({av}) [inter-procedural]"
+                                    )
+                                    self.tainted[assignment.target] = TaintedVariable(
+                                        name=assignment.target,
+                                        source_pattern=source_taint.source_pattern,
+                                        source_line=source_taint.source_line,
+                                        propagation_path=new_path,
+                                    )
+                                    changed = True
+                                    break
+                            if assignment.target in self.tainted:
+                                break
+                        if assignment.target in self.tainted:
+                            break
     
     def _is_assignment_sanitized(self, assignment: VariableAssignment, rule: TaintRule) -> bool:
         """Check if an assignment is sanitized"""
@@ -337,6 +436,412 @@ class TaintAnalyzer:
         return False
     
     # _find_tainted_in_match removed (replaced by _find_tainted_nodes_in_match)
+
+    # ================================================================
+    # Inter-procedural taint analysis (Phase 3)
+    # ================================================================
+
+    def _build_call_graph(self, ast: GenericNode) -> CallGraph:
+        """Build a call graph for all functions in the file."""
+        functions: Dict[str, GenericNode] = {}
+        calls: Dict[str, Set[str]] = {}
+        reverse: Dict[str, Set[str]] = {}
+
+        # Collect all function definitions
+        func_nodes = ast.find_all(NodeKind.FUNCTION_DEF)
+        if len(func_nodes) > 500:
+            return CallGraph(functions={}, summaries={}, calls={}, reverse={})
+
+        for func_node in func_nodes:
+            if func_node.name:
+                functions[func_node.name] = func_node
+
+        # Build call edges
+        for func_name, func_node in functions.items():
+            callees: Set[str] = set()
+            call_nodes = func_node.find_all(NodeKind.CALL)
+            for call_node in call_nodes:
+                callee = self._resolve_callee_name(call_node)
+                if callee and callee in functions and callee != func_name:
+                    callees.add(callee)
+                    if callee not in reverse:
+                        reverse[callee] = set()
+                    reverse[callee].add(func_name)
+            calls[func_name] = callees
+
+        return CallGraph(functions=functions, summaries={}, calls=calls, reverse=reverse)
+
+    def _resolve_callee_name(self, call_node: GenericNode) -> Optional[str]:
+        """Resolve the function name from a CALL node."""
+        if call_node.name:
+            # Handle dotted names: self.foo -> foo, obj.method -> method
+            parts = call_node.name.split('.')
+            return parts[-1]
+        return None
+
+    def _extract_param_names(self, func_node: GenericNode) -> List[str]:
+        """Extract parameter names from a FUNCTION_DEF node, excluding self/cls."""
+        names = []
+        for param in func_node.params:
+            if param.kind == NodeKind.IDENTIFIER:
+                name = param.text
+            else:
+                ident = param.find_first(NodeKind.IDENTIFIER)
+                name = ident.text if ident else None
+            if name and name not in ('self', 'cls'):
+                names.append(name)
+        return names
+
+    def _get_function_body(self, func_node: GenericNode) -> Optional[GenericNode]:
+        """Find the block/body child of a function definition."""
+        for child in func_node.children:
+            if child.kind == NodeKind.BLOCK:
+                return child
+        return None
+
+    # ----------------------------------------------------------------
+    # Topological sort with SCC detection (Tarjan's algorithm)
+    # ----------------------------------------------------------------
+
+    def _topological_order(self, call_graph: CallGraph) -> List[List[str]]:
+        """Return SCCs in reverse topological order (callees before callers)."""
+        index_counter = [0]
+        stack: List[str] = []
+        on_stack: Set[str] = set()
+        indices: Dict[str, int] = {}
+        lowlinks: Dict[str, int] = {}
+        result: List[List[str]] = []
+
+        def strongconnect(v: str):
+            indices[v] = index_counter[0]
+            lowlinks[v] = index_counter[0]
+            index_counter[0] += 1
+            stack.append(v)
+            on_stack.add(v)
+
+            for w in call_graph.calls.get(v, set()):
+                if w not in indices:
+                    strongconnect(w)
+                    lowlinks[v] = min(lowlinks[v], lowlinks[w])
+                elif w in on_stack:
+                    lowlinks[v] = min(lowlinks[v], indices[w])
+
+            if lowlinks[v] == indices[v]:
+                scc: List[str] = []
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    scc.append(w)
+                    if w == v:
+                        break
+                result.append(scc)
+
+        for v in call_graph.functions:
+            if v not in indices:
+                strongconnect(v)
+
+        return result  # Already in reverse topological order from Tarjan's
+
+    # ----------------------------------------------------------------
+    # Function summary generation
+    # ----------------------------------------------------------------
+
+    def _generate_summaries(self, call_graph: CallGraph, rule: TaintRule) -> Dict[str, FunctionSummary]:
+        """Generate function summaries in topological order."""
+        summaries: Dict[str, FunctionSummary] = {}
+        sccs = self._topological_order(call_graph)
+
+        for scc in sccs:
+            if len(scc) > 1:
+                # Mutually recursive: conservative summary
+                for func_name in scc:
+                    func_node = call_graph.functions[func_name]
+                    params = self._extract_param_names(func_node)
+                    summaries[func_name] = FunctionSummary(
+                        name=func_name,
+                        parameters=params,
+                        returns_taint_from=set(range(len(params))),
+                        returns_source=False,
+                        source_pattern=None,
+                        internal_sinks=[],
+                        has_sanitizer=False,
+                        line=func_node.line,
+                        end_line=func_node.end_line,
+                        node=func_node,
+                    )
+            else:
+                func_name = scc[0]
+                func_node = call_graph.functions[func_name]
+                summaries[func_name] = self._summarize_function(func_node, rule, summaries)
+
+        call_graph.summaries = summaries
+        return summaries
+
+    def _summarize_function(self, func_node: GenericNode, rule: TaintRule,
+                            existing_summaries: Dict[str, FunctionSummary]) -> FunctionSummary:
+        """Generate a summary for a single non-recursive function."""
+        params = self._extract_param_names(func_node)
+        body = self._get_function_body(func_node)
+        returns_taint_from: Set[int] = set()
+        internal_sinks: List[InternalSink] = []
+        returns_source = False
+        source_pattern_str: Optional[str] = None
+        has_sanitizer = False
+
+        if not body:
+            # No body found — try using the whole function node as body
+            body = func_node
+
+        # Check if body contains a sanitizer
+        if rule.sanitizers:
+            for sanitizer in rule.sanitizers:
+                if self.matcher.find_all(sanitizer, body):
+                    has_sanitizer = True
+                    break
+
+        # Check if body contains a taint source that flows to return
+        for source_pattern in rule.sources:
+            source_matches = self.matcher.find_all(source_pattern, body)
+            if source_matches:
+                # Check if any source flows to a return
+                return_nodes = body.find_all(NodeKind.RETURN)
+                if return_nodes:
+                    returns_source = True
+                    source_pattern_str = source_pattern.pattern_text
+
+        # For each parameter, simulate taint and check what it reaches
+        for i, param_name in enumerate(params):
+            local_tainted: Dict[str, TaintedVariable] = {
+                param_name: TaintedVariable(
+                    name=param_name,
+                    source_pattern=f"param:{param_name}",
+                    source_line=func_node.line,
+                    propagation_path=[f"Parameter: {param_name}"],
+                )
+            }
+
+            # Collect assignments within this function body only
+            local_assignments = self._collect_assignments_in_scope(body)
+
+            # Propagate taint locally
+            self._propagate_taint_local(local_tainted, local_assignments, rule, existing_summaries)
+
+            # Check if taint reaches any RETURN node
+            return_nodes = body.find_all(NodeKind.RETURN)
+            for ret_node in return_nodes:
+                ref_vars = self._get_referenced_variables(ret_node)
+                for var in ref_vars:
+                    if var in local_tainted:
+                        returns_taint_from.add(i)
+                        break
+                if i in returns_taint_from:
+                    break
+
+            # Check if taint reaches any sink pattern
+            for sink_pattern in rule.sinks:
+                sink_matches = self.matcher.find_all(sink_pattern, body)
+                for match in sink_matches:
+                    if match.node:
+                        ref_vars = self._get_referenced_variables(match.node)
+                        for var in ref_vars:
+                            if var in local_tainted:
+                                internal_sinks.append(InternalSink(
+                                    sink_pattern=sink_pattern.pattern_text,
+                                    param_indices={i},
+                                    line=match.line,
+                                    rule_id=rule.id,
+                                ))
+                                break
+
+        # Merge internal sinks with same line
+        merged_sinks: Dict[int, InternalSink] = {}
+        for sink in internal_sinks:
+            if sink.line in merged_sinks:
+                merged_sinks[sink.line].param_indices |= sink.param_indices
+            else:
+                merged_sinks[sink.line] = sink
+        internal_sinks = list(merged_sinks.values())
+
+        return FunctionSummary(
+            name=func_node.name or "",
+            parameters=params,
+            returns_taint_from=returns_taint_from,
+            returns_source=returns_source,
+            source_pattern=source_pattern_str,
+            internal_sinks=internal_sinks,
+            has_sanitizer=has_sanitizer,
+            line=func_node.line,
+            end_line=func_node.end_line,
+            node=func_node,
+        )
+
+    def _collect_assignments_in_scope(self, node: GenericNode) -> List[VariableAssignment]:
+        """Collect assignments within a scope, stopping at nested FUNCTION_DEF boundaries."""
+        assignments: List[VariableAssignment] = []
+
+        def walk(n: GenericNode):
+            if n.kind == NodeKind.FUNCTION_DEF and n is not node:
+                return  # Don't descend into nested functions
+            if n.kind == NodeKind.ASSIGNMENT:
+                target = self._get_assignment_target(n)
+                source_vars = self._get_referenced_variables(n)
+                if target:
+                    source_vars.discard(target)
+                    assignments.append(VariableAssignment(
+                        target=target,
+                        source_vars=source_vars,
+                        line=n.line,
+                        column=n.column,
+                        node=n,
+                    ))
+            for child in n.children:
+                walk(child)
+
+        walk(node)
+        return assignments
+
+    def _propagate_taint_local(self, tainted: Dict[str, TaintedVariable],
+                               assignments: List[VariableAssignment],
+                               rule: TaintRule,
+                               existing_summaries: Dict[str, FunctionSummary]):
+        """Propagate taint through assignments locally (within a function body)."""
+        changed = True
+        iterations = 0
+        max_iterations = 100
+
+        while changed and iterations < max_iterations:
+            changed = False
+            iterations += 1
+
+            for assignment in assignments:
+                if assignment.target in tainted:
+                    continue
+                if self._is_assignment_sanitized(assignment, rule):
+                    continue
+
+                # Part A: Direct variable propagation
+                for source_var in assignment.source_vars:
+                    if source_var in tainted:
+                        source_taint = tainted[source_var]
+                        new_path = source_taint.propagation_path.copy()
+                        new_path.append(f"Line {assignment.line}: {assignment.target} = ... {source_var} ...")
+                        tainted[assignment.target] = TaintedVariable(
+                            name=assignment.target,
+                            source_pattern=source_taint.source_pattern,
+                            source_line=source_taint.source_line,
+                            propagation_path=new_path,
+                        )
+                        changed = True
+                        break
+
+                if assignment.target in tainted:
+                    continue
+
+                # Part B: Inter-procedural return propagation
+                call_nodes = assignment.node.find_all(NodeKind.CALL)
+                for call_node in call_nodes:
+                    callee = self._resolve_callee_name(call_node)
+                    if not callee or callee not in existing_summaries:
+                        continue
+                    summary = existing_summaries[callee]
+                    if summary.has_sanitizer:
+                        continue
+
+                    # Check if callee returns a source
+                    if summary.returns_source:
+                        tainted[assignment.target] = TaintedVariable(
+                            name=assignment.target,
+                            source_pattern=summary.source_pattern or "function_source",
+                            source_line=summary.line,
+                            propagation_path=[f"Source via {callee}()"],
+                        )
+                        changed = True
+                        break
+
+                    # Check if any tainted arg flows to return
+                    for idx, param_name in enumerate(summary.parameters):
+                        if idx >= len(call_node.args):
+                            continue
+                        if idx not in summary.returns_taint_from:
+                            continue
+                        arg_node = call_node.args[idx]
+                        arg_vars = self._get_referenced_variables(arg_node)
+                        for av in arg_vars:
+                            if av in tainted:
+                                source_taint = tainted[av]
+                                new_path = source_taint.propagation_path.copy()
+                                new_path.append(f"Line {assignment.line}: {assignment.target} = {callee}({av}) [inter-procedural]")
+                                tainted[assignment.target] = TaintedVariable(
+                                    name=assignment.target,
+                                    source_pattern=source_taint.source_pattern,
+                                    source_line=source_taint.source_line,
+                                    propagation_path=new_path,
+                                )
+                                changed = True
+                                break
+                        if assignment.target in tainted:
+                            break
+                    if assignment.target in tainted:
+                        break
+
+    # ----------------------------------------------------------------
+    # Integration: check internal sinks at call sites
+    # ----------------------------------------------------------------
+
+    def _check_internal_sinks(self, ast: GenericNode, rule: TaintRule,
+                              summaries: Dict[str, FunctionSummary]) -> List[Finding]:
+        """Check tainted args at call sites against callee internal sinks."""
+        findings: List[Finding] = []
+        call_nodes = ast.find_all(NodeKind.CALL)
+
+        for call_node in call_nodes:
+            callee = self._resolve_callee_name(call_node)
+            if not callee or callee not in summaries:
+                continue
+            summary = summaries[callee]
+            if summary.has_sanitizer:
+                continue
+
+            for idx, param_name in enumerate(summary.parameters):
+                if idx >= len(call_node.args):
+                    continue
+                arg_node = call_node.args[idx]
+                arg_vars = self._get_referenced_variables(arg_node)
+                for av in arg_vars:
+                    if av not in self.tainted:
+                        continue
+                    taint_info = self.tainted[av]
+                    for isink in summary.internal_sinks:
+                        if idx in isink.param_indices:
+                            path_str = " -> ".join(taint_info.propagation_path[-3:])
+                            message = (
+                                f"{rule.message}\n\n"
+                                f"Taint flow: {path_str}\n\n"
+                                f"Tainted variable '{av}' flows to sink inside {callee}() [inter-procedural]."
+                            )
+                            findings.append(Finding(
+                                rule_id=rule.id,
+                                rule_name=rule.name,
+                                message=message,
+                                severity=rule.severity,
+                                line=call_node.line,
+                                column=call_node.column,
+                                text=call_node.text,
+                                end_line=call_node.end_line,
+                                end_column=call_node.end_column,
+                                metavariables={},
+                                metadata={
+                                    **rule.metadata,
+                                    'taint_source': taint_info.source_pattern,
+                                    'taint_source_line': taint_info.source_line,
+                                    'tainted_variable': av,
+                                    'inter_procedural': True,
+                                    'callee': callee,
+                                },
+                            ))
+                            break
+
+        return findings
 
 
 def analyze_taint(ast: GenericNode, rules: List[TaintRule]) -> List[Finding]:

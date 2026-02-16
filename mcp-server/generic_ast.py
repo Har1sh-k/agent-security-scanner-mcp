@@ -87,6 +87,7 @@ class GenericNode:
     value: Optional['GenericNode'] = None
     target: Optional['GenericNode'] = None
     args: List['GenericNode'] = field(default_factory=list)
+    params: List['GenericNode'] = field(default_factory=list)  # For FUNCTION_DEF: parameter nodes
     operator: Optional[str] = None
     
     def find_all(self, kind: NodeKind) -> List['GenericNode']:
@@ -524,12 +525,16 @@ class ASTConverter:
                 if child.type in ('+', '-', '*', '/', '%', '==', '!=', '<', '>', '<=', '>=', 'and', 'or', '&&', '||', '+'):
                     node.operator = source_bytes[child.start_byte:child.end_byte].decode('utf-8')
         
-        # For function definitions, extract name
+        # For function definitions, extract name and parameters
         elif node.kind == NodeKind.FUNCTION_DEF:
             for child in ts_node.children:
                 if child.type == 'identifier' or child.type == 'name':
                     node.name = source_bytes[child.start_byte:child.end_byte].decode('utf-8')
-                    break
+                elif child.type in ('parameters', 'formal_parameters', 'parameter_list'):
+                    for param_child in child.children:
+                        if param_child.type not in ('(', ')', ',', 'def'):
+                            param_node = self.convert(param_child, source_bytes)
+                            node.params.append(param_node)
 
 
 def convert_tree(ts_tree, language: str, source_bytes: bytes) -> GenericNode:

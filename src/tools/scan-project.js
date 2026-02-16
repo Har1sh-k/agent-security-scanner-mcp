@@ -223,9 +223,9 @@ export async function scanProject({ directory_path, recursive, include_patterns,
   let crossFileIssues = [];
   if (cross_file && files.length <= 50) {
     try {
-      const { runCrossFileAnalyzer } = await import('../utils.js');
-      if (typeof runCrossFileAnalyzer === 'function') {
-        const crossResults = runCrossFileAnalyzer(files);
+      const { runCrossFileAnalyzerAsync } = await import('../utils.js');
+      if (typeof runCrossFileAnalyzerAsync === 'function') {
+        const crossResults = await runCrossFileAnalyzerAsync(files);
         if (Array.isArray(crossResults)) {
           crossFileIssues = crossResults;
           for (const issue of crossFileIssues) {

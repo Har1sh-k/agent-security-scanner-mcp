@@ -150,6 +150,14 @@ export async function runDoctor(args) {
     issues++;
   }
 
+  // 3b. daemon.py reachable
+  const daemonPath = join(__dirname, '..', '..', 'daemon.py');
+  if (existsSync(daemonPath)) {
+    console.log(`    \u2713 daemon.py found`);
+  } else {
+    console.log(`    \u26a0 daemon.py not found (daemon mode unavailable, sync fallback will be used)`);
+  }
+
   // 4. Python can import yaml (analyzer dependency check)
   if (pythonCmd && existsSync(analyzerPath)) {
     const yamlCheck = checkCommand(pythonCmd, ['-c', 'import yaml; print("ok")']);
