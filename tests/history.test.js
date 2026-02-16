@@ -73,17 +73,24 @@ describe('saveResult', () => {
   });
 
   it('should save multiple results as separate files', () => {
-    // Manually create two result files with distinct timestamps to avoid sub-second collision
+    // Manually create two result files with distinct timestamps
     const resultsDir = join(tempDir, '.scanner', 'results');
     mkdirSync(resultsDir, { recursive: true });
 
-    const entry1 = { timestamp: new Date().toISOString(), directory: tempDir, grade: 'D', files_scanned: 5, issues_count: 10, by_severity: { error: 5, warning: 3, info: 2 }, issues: [] };
-    const entry2 = { timestamp: new Date().toISOString(), directory: tempDir, grade: 'C', files_scanned: 10, issues_count: 5, by_severity: { error: 1, warning: 2, info: 2 }, issues: [] };
-
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const ts1 = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const ts2 = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(Math.min(now.getSeconds() + 1, 59))}`;
+
+    // Create timestamps with different seconds to avoid collision
+    const time1 = new Date(now.getTime());
+    time1.setSeconds(0);  // Set to :00
+    const ts1 = `${time1.getFullYear()}-${pad(time1.getMonth() + 1)}-${pad(time1.getDate())}T${pad(time1.getHours())}-${pad(time1.getMinutes())}-${pad(time1.getSeconds())}`;
+
+    const time2 = new Date(now.getTime());
+    time2.setSeconds(5);  // Set to :05
+    const ts2 = `${time2.getFullYear()}-${pad(time2.getMonth() + 1)}-${pad(time2.getDate())}T${pad(time2.getHours())}-${pad(time2.getMinutes())}-${pad(time2.getSeconds())}`;
+
+    const entry1 = { timestamp: time1.toISOString(), directory: tempDir, grade: 'D', files_scanned: 5, issues_count: 10, by_severity: { error: 5, warning: 3, info: 2 }, issues: [] };
+    const entry2 = { timestamp: time2.toISOString(), directory: tempDir, grade: 'C', files_scanned: 10, issues_count: 5, by_severity: { error: 1, warning: 2, info: 2 }, issues: [] };
 
     writeFileSync(join(resultsDir, `${ts1}.json`), JSON.stringify(entry1));
     writeFileSync(join(resultsDir, `${ts2}.json`), JSON.stringify(entry2));
@@ -167,13 +174,14 @@ describe('loadHistory', () => {
     const resultsDir = join(tempDir, '.scanner', 'results');
     mkdirSync(resultsDir, { recursive: true });
 
-    // Valid file
+    // Valid file - use saveResult to create it
     saveResult(tempDir, mockScanResult({ grade: 'A' }));
 
-    // Corrupt file
+    // Corrupt file with different timestamp to avoid collision
     const pad = (n) => String(n).padStart(2, '0');
     const now = new Date();
-    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds() + 1 > 59 ? 59 : now.getSeconds() + 1)}`;
+    now.setSeconds(10);  // Set to :10 to avoid collision with :00-:05
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
     writeFileSync(join(resultsDir, `${ts}.json`), 'this is not json{{{');
 
     const results = loadHistory(tempDir, 90);
@@ -191,18 +199,24 @@ describe('getTrends', () => {
   });
 
   it('should return grade and issue trends', () => {
-    // Create two results with distinct timestamps to avoid sub-second collision
+    // Create two results with distinct timestamps to avoid collision
     const resultsDir = join(tempDir, '.scanner', 'results');
     mkdirSync(resultsDir, { recursive: true });
 
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
-    const ts1 = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const ts2 = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(Math.min(now.getSeconds() + 1, 59))}`;
 
-    const entry1 = { timestamp: now.toISOString(), directory: tempDir, grade: 'D', files_scanned: 5, issues_count: 10, by_severity: { error: 5, warning: 3, info: 2 }, issues: [] };
-    const laterDate = new Date(now.getTime() + 1000);
-    const entry2 = { timestamp: laterDate.toISOString(), directory: tempDir, grade: 'C', files_scanned: 10, issues_count: 5, by_severity: { error: 1, warning: 2, info: 2 }, issues: [] };
+    // Create timestamps with different seconds
+    const time1 = new Date(now.getTime());
+    time1.setSeconds(15);  // Set to :15
+    const ts1 = `${time1.getFullYear()}-${pad(time1.getMonth() + 1)}-${pad(time1.getDate())}T${pad(time1.getHours())}-${pad(time1.getMinutes())}-${pad(time1.getSeconds())}`;
+
+    const time2 = new Date(now.getTime());
+    time2.setSeconds(20);  // Set to :20
+    const ts2 = `${time2.getFullYear()}-${pad(time2.getMonth() + 1)}-${pad(time2.getDate())}T${pad(time2.getHours())}-${pad(time2.getMinutes())}-${pad(time2.getSeconds())}`;
+
+    const entry1 = { timestamp: time1.toISOString(), directory: tempDir, grade: 'D', files_scanned: 5, issues_count: 10, by_severity: { error: 5, warning: 3, info: 2 }, issues: [] };
+    const entry2 = { timestamp: time2.toISOString(), directory: tempDir, grade: 'C', files_scanned: 10, issues_count: 5, by_severity: { error: 1, warning: 2, info: 2 }, issues: [] };
 
     writeFileSync(join(resultsDir, `${ts1}.json`), JSON.stringify(entry1));
     writeFileSync(join(resultsDir, `${ts2}.json`), JSON.stringify(entry2));
