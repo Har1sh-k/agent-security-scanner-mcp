@@ -860,6 +860,16 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Changelog
 
+### v3.7.0
+- **Python Daemon** - Long-running Python process with JSONL protocol (~10x faster repeat scans via LRU caching of 200 entries keyed by file mtime)
+- **Daemon Client** - Auto-start, health checks, graceful shutdown, automatic fallback to sync mode on failure (3 restarts/60s limit)
+- **Inter-procedural Taint Analysis** - Call-graph construction and cross-function taint propagation with multi-hop resolution (capped at 500 iterations)
+- **Function Summaries** - Tracks param-to-return taint flows, internal sinks (`os.system(param)`), source-returning functions, and sanitizer presence
+- **Enhanced Taint Detection** - Detects taint through 3+ function chains, handles method calls, default args, unpacking, and recursive functions
+- **10 New Pytest Tests** - Comprehensive inter-procedural taint coverage: basic param→return, internal sinks, multi-hop chains, sanitizer blocking, 500-function cap
+- **9 New Vitest Tests** - Daemon protocol validation, health checks, caching, error handling, graceful shutdown
+- **Doctor Command Enhancement** - Added daemon health status to diagnostic output
+
 ### v3.6.0
 - **Bypass Hardening** - Closed 5 critical prompt injection bypass vectors: code block delimiter confusion (`~~~`, `<code>`, `<!---->`), pattern fragmentation (string concat, C-style comments), multi-encoding (base64/hex/URL/ROT13 cascade), multi-turn escalation (cross-turn boundary scanning, Crescendo frame-setting), and composite threshold gaming (co-occurrence matrix, orthogonal dimension scoring)
 - **Unicode Normalization Pipeline** - NFKC normalization, Cyrillic/Greek homoglyph canonicalization (40+ mappings), zero-width character stripping, Zalgo diacritics removal, invisible Unicode detection as obfuscation indicator
