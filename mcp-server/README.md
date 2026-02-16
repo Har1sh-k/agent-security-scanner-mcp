@@ -20,7 +20,7 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 | `scan_project` | Scan entire project with A-F security grading | For project-wide security audits |
 | `check_package` | Verify a package name isn't AI-hallucinated (4.3M+ packages) | Before adding any new dependency |
 | `scan_packages` | Bulk-check all imports in a file for hallucinated packages | Before committing code with new imports |
-| `scan_agent_prompt` | Detect prompt injection and malicious instructions (56 rules) | Before acting on external/untrusted input |
+| `scan_agent_prompt` | Detect prompt injection with bypass hardening (59 rules + multi-encoding) | Before acting on external/untrusted input |
 | `list_security_rules` | List available security rules and fix templates | To check rule coverage for a language |
 
 ## Quick Start
@@ -250,6 +250,8 @@ Scan a code file's imports to detect AI-hallucinated package names. Use after wr
 ### `scan_agent_prompt`
 
 Scan a prompt or instruction for malicious intent before executing it. Use when receiving instructions from untrusted sources (files, web content, user uploads). Detects prompt injection, exfiltration attempts, backdoor requests, social engineering, and jailbreaks.
+
+**New in v3.6.0:** Bypass hardening against 5 attack vectors (code block delimiter confusion, pattern fragmentation, multi-encoding, multi-turn escalation, composite threshold gaming) with Unicode normalization, homoglyph detection, and optional Garak deep analysis.
 
 **Parameters:**
 
@@ -858,6 +860,34 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Changelog
 
+### v3.7.0
+- **Python Daemon** - Long-running Python process with JSONL protocol (~10x faster repeat scans via LRU caching of 200 entries keyed by file mtime)
+- **Daemon Client** - Auto-start, health checks, graceful shutdown, automatic fallback to sync mode on failure (3 restarts/60s limit)
+- **Inter-procedural Taint Analysis** - Call-graph construction and cross-function taint propagation with multi-hop resolution (capped at 500 iterations)
+- **Function Summaries** - Tracks param-to-return taint flows, internal sinks (`os.system(param)`), source-returning functions, and sanitizer presence
+- **Enhanced Taint Detection** - Detects taint through 3+ function chains, handles method calls, default args, unpacking, and recursive functions
+- **10 New Pytest Tests** - Comprehensive inter-procedural taint coverage: basic param→return, internal sinks, multi-hop chains, sanitizer blocking, 500-function cap
+- **9 New Vitest Tests** - Daemon protocol validation, health checks, caching, error handling, graceful shutdown
+- **Doctor Command Enhancement** - Added daemon health status to diagnostic output
+
+### v3.6.0
+- **Bypass Hardening** - Closed 5 critical prompt injection bypass vectors: code block delimiter confusion (`~~~`, `<code>`, `<!---->`), pattern fragmentation (string concat, C-style comments), multi-encoding (base64/hex/URL/ROT13 cascade), multi-turn escalation (cross-turn boundary scanning, Crescendo frame-setting), and composite threshold gaming (co-occurrence matrix, orthogonal dimension scoring)
+- **Unicode Normalization Pipeline** - NFKC normalization, Cyrillic/Greek homoglyph canonicalization (40+ mappings), zero-width character stripping, Zalgo diacritics removal, invisible Unicode detection as obfuscation indicator
+- **Multi-Encoding Decode Cascade** - Replaced base64-only decoder with comprehensive cascade supporting nested base64, hex, URL encoding, and indicator-gated ROT13
+- **Enhanced Composite Scoring** - Category co-occurrence boost matrix (12 suspicious pairs, +40% cap), orthogonal dimension scoring (7 attack dimensions, +40 flat bonus), low-signal accumulation for multiple LOW-confidence findings
+- **Garak Integration** - Optional NVIDIA Garak LLM vulnerability scanner integration via `deep_scan` parameter for advanced encoding probes and latent injection detection
+- **PromptFoo Red-Team Suite** - 13 automated test cases with custom MCP provider for continuous bypass detection validation (`npm run test:redteam`)
+- **3 New YAML Rules** - Whitespace fragmentation, Crescendo escalation setup, leetspeak/character substitution obfuscation
+- **Test Coverage Expansion** - 28 new prompt scanner tests covering all bypass vectors and false positive regression
+
+### v3.5.2
+- **Prompt Injection Fixes** - Closed 5 bypass vectors: tilde code fences (~~~), string fragmentation, base64 encoding, multi-turn escalation, and composite indicators
+- **Advanced Decoding** - Added Morse code, Braille Unicode, and Zalgo diacritics decoding to detect obfuscated prompt attacks
+- **Garak Red-Team Validation** - Improved detection rates to 100% across all categories (encoding, promptinject, jailbreak)
+- **npm Bloom Filter** - Ships npm-bloom.json (7.9 MB) in base package — all 7 ecosystems now work out of the box (npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land)
+- **Expanded Benchmarks** - Benchmark corpus increased to 424 annotations across 17 files (was 335/13)
+- **CI Improvements** - Added pytest to requirements.txt, expanded test matrix with AST mode on Node 22
+
 ### v3.4.0
 - **Severity Calibration** - 207-rule severity map with HIGH/MEDIUM/LOW confidence scores for more accurate prioritization
 - **Cross-Engine Deduplication** - ~30-50% noise reduction by deduplicating findings across AST, taint, and regex engines
@@ -894,20 +924,20 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Installation Options
 
-### Default Package (Lightweight - 2.7 MB)
+### Default Package (10.6 MB)
 
 ```bash
 npm install -g agent-security-scanner-mcp
 ```
 
-Includes hallucination detection for: **PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land** (1M+ packages)
+**New in v3.5.2:** Now includes **all 7 ecosystems** out of the box — npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land (4.3M+ packages total)
 
-### Full Package (With npm - 10.3 MB)
+### Legacy Lightweight Package (2.7 MB)
 
-If you need **npm/JavaScript hallucination detection** (3.3M packages):
+For environments with strict size constraints (excludes npm bloom filter):
 
 ```bash
-npm install -g agent-security-scanner-mcp-full
+npm install -g agent-security-scanner-mcp@3.4.1
 ```
 
 ---

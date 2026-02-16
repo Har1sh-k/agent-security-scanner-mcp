@@ -6,7 +6,8 @@
       "Bash(xargs du:*)",
       "Bash(du:*)",
       "Bash(tar czf:*)",
-      "Bash(git count-objects:*)"
+      "Bash(git count-objects:*)",
+      "Bash(gh run list:*)"
     ]
   }
 }
