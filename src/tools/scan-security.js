@@ -1,7 +1,7 @@
 // src/tools/scan-security.js
 import { z } from "zod";
 import { existsSync, readFileSync } from "fs";
-import { detectLanguage, runAnalyzer, generateFix, toSarif, getEngineMode } from '../utils.js';
+import { detectLanguage, runAnalyzerAsync, generateFix, toSarif, getEngineMode } from '../utils.js';
 import { deduplicateFindings } from '../dedup.js';
 import { applyContextFilter, detectFrameworks, applyFrameworkAdjustments } from '../context.js';
 import { loadConfig, shouldExcludeFile, applyConfig } from '../config.js';
@@ -75,7 +75,7 @@ export async function scanSecurity({ file_path, output_format, verbosity, engine
     };
   }
 
-  const rawIssues = runAnalyzer(file_path, engine || 'auto');
+  const rawIssues = await runAnalyzerAsync(file_path, engine || 'auto');
 
   if (rawIssues.error) {
     return {

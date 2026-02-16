@@ -11,7 +11,7 @@ import { homedir, platform } from "os";
 import { createInterface } from "readline";
 import { createHash } from "crypto";
 import { envVarReplacement, FIX_TEMPLATES } from './src/fix-patterns.js';
-import { detectLanguage, runAnalyzer, generateFix, toSarif } from './src/utils.js';
+import { detectLanguage, runAnalyzer, generateFix, toSarif, shutdownDaemon } from './src/utils.js';
 import { scanSecuritySchema, scanSecurity } from './src/tools/scan-security.js';
 import { fixSecuritySchema, fixSecurity } from './src/tools/fix-security.js';
 import { loadPackageLists, checkPackageSchema, checkPackage, getPackageStats } from './src/tools/check-package.js';
@@ -439,7 +439,20 @@ if (cliArgs[0] === 'init') {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Security Scanner MCP Server running on stdio");
+
+    // Shutdown daemon when MCP server closes
+    server.server.onclose = async () => {
+      await shutdownDaemon();
+    };
   }
+
+  // Graceful shutdown on signals
+  const shutdownHandler = async () => {
+    await shutdownDaemon();
+    process.exit(0);
+  };
+  process.on('SIGTERM', shutdownHandler);
+  process.on('SIGINT', shutdownHandler);
 
   main().catch((error) => {
     console.error("Fatal error:", error);

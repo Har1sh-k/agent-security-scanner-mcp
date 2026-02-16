@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "fs";
 import { dirname, join, extname, basename } from "path";
 import { fileURLToPath } from "url";
 import { FIX_TEMPLATES } from './fix-patterns.js';
+import { getDaemonClient, shutdownDaemon } from './daemon-client.js';
 
 // Handle both ESM and CJS bundling (Smithery bundles to CJS)
 let __dirname;
@@ -91,6 +92,37 @@ export function runAnalyzer(filePath, engine = 'auto') {
     return { error: error.message };
   }
 }
+
+// Async analyzer — tries daemon first, falls back to sync execFileSync
+export async function runAnalyzerAsync(filePath, engine = 'auto') {
+  try {
+    const client = getDaemonClient();
+    if (client.isAvailable) {
+      return await client.analyze(filePath, engine);
+    }
+  } catch {
+    // Daemon failed — fall through to sync
+  }
+  return runAnalyzer(filePath, engine);
+}
+
+// Async cross-file analyzer — tries daemon first, falls back to sync
+export async function runCrossFileAnalyzerAsync(filePaths) {
+  try {
+    const client = getDaemonClient();
+    if (client.isAvailable) {
+      const result = await client.crossFileAnalyze(filePaths);
+      return Array.isArray(result)
+        ? result.filter(f => f.ruleId === 'cross-file-taint-warning')
+        : [];
+    }
+  } catch {
+    // Daemon failed — fall through to sync
+  }
+  return runCrossFileAnalyzer(filePaths);
+}
+
+export { shutdownDaemon };
 
 // Patterns that indicate an unsafe fix (user input still concatenated into dangerous sinks)
 const UNSAFE_FIX_PATTERNS = [

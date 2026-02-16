@@ -84,6 +84,7 @@
     "src/cli/*.js",
     "src/fix-patterns.js",
     "src/utils.js",
+    "src/daemon-client.js",
     "src/dedup.js",
     "src/context.js",
     "src/config.js",
@@ -102,7 +103,8 @@
     "packages/**",
     "skills/**",
     "scripts/postinstall.js",
-    "cross_file_analyzer.py"
+    "cross_file_analyzer.py",
+    "daemon.py"
   ],
   "devDependencies": {
     "all-the-package-names": "^2.0.2349",

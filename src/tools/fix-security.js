@@ -1,7 +1,7 @@
 // src/tools/fix-security.js
 import { z } from "zod";
 import { existsSync, readFileSync } from "fs";
-import { detectLanguage, runAnalyzer, generateFix } from '../utils.js';
+import { detectLanguage, runAnalyzerAsync, generateFix } from '../utils.js';
 import { deduplicateFindings } from '../dedup.js';
 import { applyContextFilter, detectFrameworks, applyFrameworkAdjustments } from '../context.js';
 import { loadConfig, shouldExcludeFile, applyConfig } from '../config.js';
@@ -60,7 +60,7 @@ export async function fixSecurity({ file_path, verbosity }) {
     };
   }
 
-  const rawIssues = runAnalyzer(file_path);
+  const rawIssues = await runAnalyzerAsync(file_path);
 
   if (rawIssues.error || !Array.isArray(rawIssues) || rawIssues.length === 0) {
     return {
