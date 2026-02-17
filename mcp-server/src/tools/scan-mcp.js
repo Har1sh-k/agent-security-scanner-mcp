@@ -18,6 +18,60 @@ const SKIP_DIRS = new Set([
 ]);
 
 // ============================================================
+// Known legitimate MCP tool names (for spoofing detection)
+// ============================================================
+const KNOWN_MCP_TOOLS = new Set([
+  // File system
+  'readFile', 'writeFile', 'editFile', 'createFile', 'deleteFile',
+  'listDirectory', 'makeDirectory', 'moveFile', 'copyFile',
+  'readMultipleFiles', 'listFiles',
+  // Shell / process
+  'bash', 'execute', 'runCommand', 'runScript',
+  // Search
+  'search', 'grep', 'find', 'glob',
+  // Web
+  'fetch', 'browse', 'webSearch', 'httpRequest',
+  // Git
+  'gitStatus', 'gitDiff', 'gitCommit', 'gitLog', 'gitAdd',
+  // Memory / context
+  'remember', 'recall', 'storeMemory', 'searchMemory',
+  // Database
+  'query', 'executeQuery', 'dbQuery',
+  // Common agent tools
+  'think', 'plan', 'summarize', 'analyze'
+]);
+
+/** Levenshtein distance — O(n*m), capped at strings up to 100 chars */
+function levenshtein(a, b) {
+  if (a.length > 100 || b.length > 100) return 999;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/** Returns the closest known tool and its distance if distance <= 2, else null */
+function findSpoofedTool(toolName) {
+  if (KNOWN_MCP_TOOLS.has(toolName)) return null; // exact match = legitimate
+  if (toolName.length < 6) return null; // too short to meaningfully compare
+  let best = null, bestDist = 3; // only flag distance <= 2
+  for (const known of KNOWN_MCP_TOOLS) {
+    if (Math.abs(known.length - toolName.length) > 2) continue;
+    const d = levenshtein(toolName, known);
+    if (d < bestDist) { bestDist = d; best = known; }
+  }
+  return best ? { spoofed: best, distance: bestDist } : null;
+}
+
+// ============================================================
 // Security rule definitions for MCP server scanning
 // ============================================================
 
@@ -283,6 +337,18 @@ const MCP_SECURITY_RULES = [
     // Matches server.tool() calls where the description string contains injection phrases
     pattern: /server\.tool\s*\(\s*["'`][^"'`]*["'`]\s*,\s*["'`][^"'`]*(ignore\s+previous|exfiltrat|override\s+.*instruction|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter|disregard\s+|extract\s+.*credential)[^"'`]*["'`]/gi,
     fileTypes: ['.js', '.ts']
+  },
+
+  // ---- Category 7: Tool name spoofing ----
+  {
+    id: 'mcp.tool-name-spoofing',
+    severity: 'ERROR',
+    category: 'tool-name-spoofing',
+    message: 'Tool name is suspiciously similar to a well-known MCP tool. This may be a name spoofing attack.',
+    // Extracts the tool name (1st arg to server.tool) for Levenshtein comparison
+    pattern: /server\.tool\s*\(\s*["'`]([a-zA-Z_$][\w$]*)["'`]/g,
+    fileTypes: ['.js', '.ts'],
+    isSpoofingRule: true
   }
 ];
 
@@ -382,6 +448,24 @@ function scanFileContent(filePath, content) {
         }
       }
 
+      // Handle spoofing rules: extract tool name and check Levenshtein distance
+      if (rule.isSpoofingRule) {
+        const toolName = match[1];
+        if (!toolName) continue;
+        const spoof = findSpoofedTool(toolName);
+        if (!spoof) continue;
+        findings.push({
+          rule: rule.id,
+          severity: rule.severity,
+          category: rule.category,
+          message: `Tool name "${toolName}" is ${spoof.distance} edit(s) away from well-known tool "${spoof.spoofed}". This may be a spoofing attack.`,
+          file: filePath,
+          line: lineNumber,
+          match: match[0].substring(0, 100)
+        });
+        continue;
+      }
+
       findings.push({
         rule: rule.id,
         severity: rule.severity,
@@ -463,6 +547,10 @@ function generateRecommendations(findings) {
 
   if (categories.has('description-injection')) {
     recommendations.push('Tool descriptions must describe functionality only. Remove any imperative language or instructions directed at the LLM — this is a tool poisoning attack vector (Adversa TOP25 #2).');
+  }
+
+  if (categories.has('tool-name-spoofing')) {
+    recommendations.push('Tool names closely matching well-known MCP tools may be spoofing attacks. Verify all registered tool names are intentional and do not mimic legitimate tools (Adversa TOP25 #9).');
   }
 
   if (recommendations.length === 0) {
