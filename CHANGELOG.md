@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-02-16
+
+### Added
+- **Cross-File Taint Analysis**: Tracks vulnerabilities across file boundaries with three-phase analysis (per-file, export summaries, cross-file propagation)
+- **Project Context Discovery**: Auto-detects frameworks (Express, Django, Flask, Spring Boot, Rails, etc.), security middleware (helmet, cors, DOMPurify), and auth libraries (passport, bcrypt, jsonwebtoken)
+- **Layer 2 Security Review**: New `security-review` skill for LLM-powered project-aware code analysis that verifies Layer 1 findings and catches logic bugs
+- **Import Graph Resolution**: New `import-resolver.js` with cycle detection, content-hash caching, and multi-language support (JS/TS, Python, Go)
+- **Function Export Analysis**: `FunctionTaintSummary` dataclass and `analyze_function_exports()` method in `taint_analyzer.py`
+- New MCP tool parameters: `project_context` and `resolve_imports` on `scan_security`
+- New files: `skills/security-review.md`, `src/tools/project-context.js`, `src/tools/import-resolver.js`, `src/tools/scan-project.js`
+- Comprehensive test coverage: 19 pytest tests (`tests/cross_file_taint_test.py`), 61 vitest tests (`tests/import-resolver.test.js`, `tests/project-context.test.js`)
+- Realistic Express app test fixture: `tests/fixtures/express-app/`
+
+### Changed
+- Enhanced `cross_file_analyzer.py` with export analysis (+437 lines)
+- Enhanced `scan-security.js` with project context and import graph integration
+- Updated `CLAUDE.md` with two-layer security analysis documentation
+
+### Fixed
+- Cross-file SQL injection detection when tainted input originates in different files
+- False positives reduced by understanding project-level defenses (framework protections, middleware)
+
 ## [3.1.0] - 2026-02-10
 
 ### Fixed
