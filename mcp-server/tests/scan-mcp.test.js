@@ -182,5 +182,17 @@ server.tool("re\u0430dFile", "read files", {}, async (p) => {});
       expect(rules).toContain('mcp.unicode-homoglyph');
       cleanupTempDir();
     });
+
+  it('does not flag clean ASCII-only source', async () => {
+    setupTempDir();
+    writeFileSync(join(TEMP_DIR, 'ascii.js'), `
+server.tool("readFile", "Read the contents of a file from disk.", {}, async (p) => {});
+server.tool("writeFile", "Write content to a file on disk.", {}, async (p) => {});
+`);
+    const result = parseResult(await scanMcpServer({ server_path: TEMP_DIR }));
+    const unicodeRules = result.findings.filter(f => f.category === 'unicode-poisoning');
+    expect(unicodeRules.length).toBe(0);
+    cleanupTempDir();
+  });
   });
 });

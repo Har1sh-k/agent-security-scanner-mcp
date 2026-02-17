@@ -268,8 +268,8 @@ const MCP_SECURITY_RULES = [
     id: 'mcp.unicode-homoglyph',
     severity: 'WARNING',
     category: 'unicode-poisoning',
-    message: 'Non-ASCII character found adjacent to ASCII in what may be an identifier. May be a homoglyph substitution attack.',
-    // Detect Cyrillic chars adjacent to ASCII word chars (common confusables)
+    message: 'Cyrillic character found adjacent to ASCII characters. This is a common homoglyph substitution pattern — Cyrillic letters (а, е, о, р, с) are visually identical to ASCII equivalents and used in tool name spoofing attacks.',
+    // Cyrillic block (U+0400-U+04FF) adjacent to ASCII — catches common confusables (а/a, е/e, о/o, р/p, с/c)
     pattern: /[a-zA-Z][\u0400-\u04FF]|[\u0400-\u04FF][a-zA-Z]/g,
     fileTypes: ['.js', '.ts', '.py']
   }
@@ -439,7 +439,15 @@ function generateRecommendations(findings) {
   }
 
   if (categories.has('unicode-poisoning')) {
-    recommendations.push('Remove hidden Unicode characters (zero-width spaces, bidi overrides, homoglyphs) from all tool names and descriptions. These are used in tool poisoning attacks to hide injected instructions.');
+    if (findings.some(f => f.rule === 'mcp.unicode-zero-width')) {
+      recommendations.push('Zero-width Unicode characters detected. Search for and remove U+200B, U+200C, U+200D, U+FEFF, U+2060 from all tool names and descriptions — these are used to hide injected instructions.');
+    }
+    if (findings.some(f => f.rule === 'mcp.unicode-bidi-override')) {
+      recommendations.push('Bidirectional override characters detected. These make source code appear differently in text editors than how it executes — a known code obfuscation technique. Remove all bidi formatting characters from source.');
+    }
+    if (findings.some(f => f.rule === 'mcp.unicode-homoglyph' || f.rule === 'mcp.manifest-name-spoofing')) {
+      recommendations.push('Cyrillic homoglyph characters detected adjacent to ASCII. Verify all tool names use only ASCII characters to prevent visual spoofing of legitimate tool names (Adversa TOP25 #9).');
+    }
   }
 
   if (recommendations.length === 0) {
