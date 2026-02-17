@@ -1,12 +1,14 @@
 // src/tools/scan-mcp.js
 import { z } from "zod";
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { createHash } from "crypto";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, resolve, relative, extname, basename } from "path";
 
 export const scanMcpServerSchema = {
   server_path: z.string().describe("Path to MCP server directory or entry file"),
   verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)"),
-  manifest: z.boolean().optional().describe("Also scan server.json manifest file for poisoning indicators (tool poisoning, name spoofing, description injection)")
+  manifest: z.boolean().optional().describe("Also scan server.json manifest file for poisoning indicators (tool poisoning, name spoofing, description injection)"),
+  update_baseline: z.boolean().optional().describe("Write current server.json tool hashes as the trusted baseline for future rug pull detection. Stored in .mcp-security-baseline.json in the server directory.")
 };
 
 // File extensions to scan
@@ -561,6 +563,10 @@ function generateRecommendations(findings) {
     recommendations.push('Tool names closely matching well-known MCP tools may be spoofing attacks. Verify all registered tool names are intentional and do not mimic legitimate tools (Adversa TOP25 #9).');
   }
 
+  if (categories.has('rug-pull')) {
+    recommendations.push('Tool schema changed since baseline. Run with update_baseline:true only after manually verifying all changes. Rug pull attacks modify tool behavior after initial user approval (Adversa TOP25 #6).');
+  }
+
   if (recommendations.length === 0) {
     recommendations.push('No critical issues found. Continue following security best practices.');
   }
@@ -649,6 +655,81 @@ function formatFull(serverPath, filesScanned, findings, grade, scannedFiles) {
 }
 
 // ============================================================
+// Rug pull detection (baseline hashing)
+// ============================================================
+
+const BASELINE_FILENAME = '.mcp-security-baseline.json';
+
+function hashTool(tool) {
+  return createHash('sha256')
+    .update(JSON.stringify({ name: tool.name, description: tool.description }))
+    .digest('hex');
+}
+
+function buildBaseline(manifestPath) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+  const hashes = {};
+  for (const tool of (manifest.tools || [])) {
+    hashes[tool.name] = hashTool(tool);
+  }
+  return hashes;
+}
+
+function writeBaseline(serverDir, hashes) {
+  const baselinePath = join(serverDir, BASELINE_FILENAME);
+  writeFileSync(baselinePath, JSON.stringify({ version: 1, tools: hashes }, null, 2), 'utf-8');
+}
+
+function checkRugPull(manifestPath, serverDir) {
+  const baselinePath = join(serverDir, BASELINE_FILENAME);
+  if (!existsSync(baselinePath)) return []; // no baseline yet
+
+  let baseline;
+  try {
+    baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
+  } catch {
+    return [];
+  }
+
+  const current = buildBaseline(manifestPath);
+  if (!current) return [];
+
+  const baselineHashes = baseline.tools || {};
+  const findings = [];
+
+  for (const [name, hash] of Object.entries(current)) {
+    if (!baselineHashes[name]) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `New tool "${name}" appeared since baseline was recorded. Verify this addition is intentional (Adversa TOP25 #6).`,
+        file: BASELINE_FILENAME,
+        line: 1,
+        match: name
+      });
+    } else if (baselineHashes[name] !== hash) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `Tool "${name}" schema/description changed since baseline. Rug pull indicator — verify the change is intentional (Adversa TOP25 #6).`,
+        file: BASELINE_FILENAME,
+        line: 1,
+        match: name
+      });
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
 // Manifest scanning (server.json)
 // ============================================================
 
@@ -706,7 +787,7 @@ function scanManifest(manifestPath) {
 // Main handler
 // ============================================================
 
-export async function scanMcpServer({ server_path, verbosity, manifest }) {
+export async function scanMcpServer({ server_path, verbosity, manifest, update_baseline }) {
   const resolvedPath = resolve(server_path);
 
   if (!existsSync(resolvedPath)) {
@@ -741,13 +822,25 @@ export async function scanMcpServer({ server_path, verbosity, manifest }) {
     const serverDir = isDir ? resolvedPath : resolve(resolvedPath, '..');
     const manifestPath = join(serverDir, 'server.json');
     if (existsSync(manifestPath)) {
+      // Update baseline if requested (do this BEFORE checking for rug pull)
+      if (update_baseline) {
+        const hashes = buildBaseline(manifestPath);
+        if (hashes) writeBaseline(serverDir, hashes);
+      }
+
       const manifestFindings = scanManifest(manifestPath);
-      // Relativize manifest finding paths to match source file path style
-      const basePath2 = isDir ? resolvedPath : resolve(resolvedPath, '..');
+      // Relativize manifest finding paths
       for (const f of manifestFindings) {
-        f.file = relative(basePath2, f.file) || basename(f.file);
+        f.file = relative(serverDir, f.file) || basename(f.file);
       }
       allFindings.push(...manifestFindings);
+
+      // Rug pull check (only when NOT writing baseline)
+      if (!update_baseline) {
+        const rugPullFindings = checkRugPull(manifestPath, serverDir);
+        // BASELINE_FILENAME is already relative, no need to relativize
+        allFindings.push(...rugPullFindings);
+      }
     }
   }
 
