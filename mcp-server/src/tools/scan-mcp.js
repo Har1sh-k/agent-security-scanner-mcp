@@ -272,6 +272,17 @@ const MCP_SECURITY_RULES = [
     // Cyrillic block (U+0400-U+04FF) adjacent to ASCII — catches common confusables (а/a, е/e, о/o, р/p, с/c)
     pattern: /[a-zA-Z][\u0400-\u04FF]|[\u0400-\u04FF][a-zA-Z]/g,
     fileTypes: ['.js', '.ts', '.py']
+  },
+
+  // ---- Category 6: Description injection ----
+  {
+    id: 'mcp.description-injection',
+    severity: 'ERROR',
+    category: 'description-injection',
+    message: 'Tool description contains imperative language directed at the LLM. This pattern is used in tool poisoning attacks to inject hidden instructions.',
+    // Matches server.tool() calls where the description string contains injection phrases
+    pattern: /server\.tool\s*\(\s*["'`][^"'`]*["'`]\s*,\s*["'`][^"'`]*(ignore\s+previous|exfiltrat|send\s+all|override\s+.*instruction|you\s+must|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter|disregard\s+|extract\s+.*credential)[^"'`]*["'`]/gi,
+    fileTypes: ['.js', '.ts']
   }
 ];
 
@@ -448,6 +459,10 @@ function generateRecommendations(findings) {
     if (findings.some(f => f.rule === 'mcp.unicode-homoglyph' || f.rule === 'mcp.manifest-name-spoofing')) {
       recommendations.push('Cyrillic homoglyph characters detected adjacent to ASCII. Verify all tool names use only ASCII characters to prevent visual spoofing of legitimate tool names (Adversa TOP25 #9).');
     }
+  }
+
+  if (categories.has('description-injection')) {
+    recommendations.push('Tool descriptions must describe functionality only. Remove any imperative language or instructions directed at the LLM — this is a tool poisoning attack vector (Adversa TOP25 #2).');
   }
 
   if (recommendations.length === 0) {
