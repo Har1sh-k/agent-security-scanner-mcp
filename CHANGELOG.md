@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-02-17
+
+### Added
+- **`scan_mcp_server` Tool** - New tool to audit MCP server source code for security vulnerabilities. Returns A-F security grade with 24+ detection rules covering insecure patterns, overly broad permissions, hardcoded secrets, eval/exec usage, and MCP-specific attack vectors
+- **Unicode / Homoglyph Poisoning Detection** - Detects zero-width characters (U+200B/C/D, FEFF, 2060), bidirectional override characters (U+202A-202E), and Cyrillic/ASCII homoglyph substitutions (`mcp.unicode-zero-width`, `mcp.unicode-bidi-override`, `mcp.unicode-homoglyph`)
+- **Tool Name Spoofing Detection** - Levenshtein-distance comparison against 35 well-known MCP tool names; flags tool names ≤2 edits from known tools (e.g. `readFi1e` spoofing `readFile`) — covers Adversa AI TOP25 #9
+- **Tool Description Injection Classifier** - Detects imperative/injection-style language in tool descriptions (`ignore previous`, `exfiltrate`, `override instructions`, etc.) — covers Adversa AI TOP25 #2 #3
+- **`server.json` Manifest Parsing** - `manifest: true` parameter scans MCP manifest alongside source code, catching poisoning that lives in the manifest rather than source
+- **Rug Pull Detection** - `update_baseline: true` hashes each tool's name+description into `.mcp-security-baseline.json`; future scans alert with `mcp.rug-pull-detected` on any tool change (added, modified, or removed) — covers Adversa AI TOP25 #6
+- **`scan_agent_action` Tool** - Pre-execution safety check for concrete agent actions (bash, file_write, file_read, http_request, file_delete). Returns ALLOW/WARN/BLOCK. Lighter-weight than `scan_agent_prompt` for evaluating specific operations
+- 29 new tests for `scan_mcp_server` (unicode poisoning, description injection, tool name spoofing, manifest parsing, rug pull — all 5 detection categories)
+
+### Changed
+- Root repo is now the canonical npm release source (`mcp-server/` subdirectory removed — was a duplicate)
+- README updated: `scan_mcp_server` and `scan_agent_action` added to tools table (Tools count: 8 → 10), full reference sections added, Side Effects note updated
+
 ## [3.8.0] - 2026-02-16
 
 ### Added
