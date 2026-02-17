@@ -8,7 +8,11 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 [![Benchmark: 97.7% precision](https://img.shields.io/badge/precision-97.7%25-brightgreen.svg)](benchmarks/RESULTS.md)
 [![CI](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml)
 
-> **New in v3.3.0:** Full [OpenClaw](https://openclaw.ai) integration with 30+ rules targeting autonomous AI threats — data exfiltration, credential theft, messaging abuse, and unsafe automation. [See OpenClaw setup](#openclaw-integration).
+> **New in v3.8.0:** Cross-file taint tracking, project context discovery (frameworks/middleware detection), and Layer 2 LLM-powered security review. Detects vulnerabilities across file boundaries and reduces false positives by understanding project defenses. [See changelog](#changelog).
+>
+> **Also new in v3.7.0:** Inter-procedural taint analysis with Python daemon caching (~4000x faster repeat scans). [See v3.7.0 demo](demo/).
+>
+> **OpenClaw integration:** 30+ rules targeting autonomous AI threats. [See setup](#openclaw-integration).
 
 ## Tools
 
