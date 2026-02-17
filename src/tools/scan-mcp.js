@@ -1,21 +1,85 @@
 // src/tools/scan-mcp.js
 import { z } from "zod";
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { createHash } from "crypto";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, resolve, relative, extname, basename } from "path";
 
 export const scanMcpServerSchema = {
   server_path: z.string().describe("Path to MCP server directory or entry file"),
-  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)")
+  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)"),
+  manifest: z.boolean().optional().describe("Also scan server.json manifest file for poisoning indicators (tool poisoning, name spoofing, description injection)"),
+  update_baseline: z.boolean().optional().describe("Write current server.json tool hashes as the trusted baseline for future rug pull detection. Stored in .mcp-security-baseline.json in the server directory.")
 };
 
 // File extensions to scan
 const SCANNABLE_EXTENSIONS = new Set(['.js', '.ts', '.py']);
+
+// Injection phrases for manifest description checking
+const MANIFEST_INJECTION_PHRASES = /ignore\s+previous|exfiltrat|override\s+.*instruction|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter|disregard\s+|extract\s+.*credential/i;
+
+// Zero-width and bidi char patterns (reuse same ranges as rules above)
+const MANIFEST_ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060]/;
+const MANIFEST_BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/;
 
 // Directories to skip when walking
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '__pycache__',
   'venv', 'env', '.venv', 'coverage', '.next', '.nuxt'
 ]);
+
+// ============================================================
+// Known legitimate MCP tool names (for spoofing detection)
+// ============================================================
+const KNOWN_MCP_TOOLS = new Set([
+  // File system
+  'readFile', 'writeFile', 'editFile', 'createFile', 'deleteFile',
+  'listDirectory', 'makeDirectory', 'moveFile', 'copyFile',
+  'readMultipleFiles', 'listFiles',
+  // Shell / process
+  'bash', 'execute', 'runCommand', 'runScript',
+  // Search
+  'search', 'grep', 'find', 'glob',
+  // Web
+  'fetch', 'browse', 'webSearch', 'httpRequest',
+  // Git
+  'gitStatus', 'gitDiff', 'gitCommit', 'gitLog', 'gitAdd',
+  // Memory / context
+  'remember', 'recall', 'storeMemory', 'searchMemory',
+  // Database
+  'query', 'executeQuery', 'dbQuery',
+  // Common agent tools
+  'think', 'plan', 'summarize', 'analyze'
+]);
+
+/** Levenshtein distance — O(n*m), capped at strings up to 100 chars */
+function levenshtein(a, b) {
+  if (a.length > 100 || b.length > 100) return 999;
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+/** Returns the closest known tool and its distance if distance <= 2, else null */
+function findSpoofedTool(toolName) {
+  if (KNOWN_MCP_TOOLS.has(toolName)) return null; // exact match = legitimate
+  if (toolName.length < 6) return null; // too short to meaningfully compare
+  let best = null, bestDist = 3; // only flag distance <= 2
+  for (const known of KNOWN_MCP_TOOLS) {
+    if (Math.abs(known.length - toolName.length) > 2) continue;
+    const d = levenshtein(toolName, known);
+    if (d < bestDist) { bestDist = d; best = known; }
+  }
+  return best ? { spoofed: best, distance: bestDist } : null;
+}
 
 // ============================================================
 // Security rule definitions for MCP server scanning
@@ -243,6 +307,58 @@ const MCP_SECURITY_RULES = [
     message: 'yaml.load() without SafeLoader can execute arbitrary Python. Use yaml.safe_load() instead.',
     pattern: /\byaml\.load\s*\([^)]*(?!Loader\s*=\s*yaml\.SafeLoader)/g,
     fileTypes: ['.py']
+  },
+
+  // ---- Category 5: Unicode poisoning ----
+  {
+    id: 'mcp.unicode-zero-width',
+    severity: 'ERROR',
+    category: 'unicode-poisoning',
+    message: 'Zero-width or invisible Unicode character detected in source. This is a common technique to hide injected instructions in tool descriptions.',
+    // U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+FEFF BOM, U+2060 WORD JOINER
+    pattern: /[\u200B\u200C\u200D\uFEFF\u2060]/g,
+    fileTypes: ['.js', '.ts', '.py']
+  },
+  {
+    id: 'mcp.unicode-bidi-override',
+    severity: 'ERROR',
+    category: 'unicode-poisoning',
+    message: 'Bidirectional text override character detected. Attackers use these to make malicious code appear differently in editors vs. execution.',
+    // U+202A-202E, U+2066-2069, U+200E, U+200F, U+061C
+    pattern: /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/g,
+    fileTypes: ['.js', '.ts', '.py']
+  },
+  {
+    id: 'mcp.unicode-homoglyph',
+    severity: 'WARNING',
+    category: 'unicode-poisoning',
+    message: 'Cyrillic character found adjacent to ASCII characters. This is a common homoglyph substitution pattern — Cyrillic letters (а, е, о, р, с) are visually identical to ASCII equivalents and used in tool name spoofing attacks.',
+    // Cyrillic block (U+0400-U+04FF) adjacent to ASCII — catches common confusables (а/a, е/e, о/o, р/p, с/c)
+    pattern: /[a-zA-Z][\u0400-\u04FF]|[\u0400-\u04FF][a-zA-Z]/g,
+    fileTypes: ['.js', '.ts', '.py']
+  },
+
+  // ---- Category 6: Description injection ----
+  {
+    id: 'mcp.description-injection',
+    severity: 'ERROR',
+    category: 'description-injection',
+    message: 'Tool description contains imperative language directed at the LLM. This pattern is used in tool poisoning attacks to inject hidden instructions.',
+    // Matches server.tool() calls where the description string contains injection phrases
+    pattern: /server\.tool\s*\(\s*["'`][^"'`]*["'`]\s*,\s*["'`][^"'`]*(ignore\s+previous|exfiltrat|override\s+.*instruction|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter|disregard\s+|extract\s+.*credential)[^"'`]*["'`]/gi,
+    fileTypes: ['.js', '.ts']
+  },
+
+  // ---- Category 7: Tool name spoofing ----
+  {
+    id: 'mcp.tool-name-spoofing',
+    severity: 'ERROR',
+    category: 'tool-name-spoofing',
+    message: 'Tool name is suspiciously similar to a well-known MCP tool. This may be a name spoofing attack.',
+    // Extracts the tool name (1st arg to server.tool) for Levenshtein comparison
+    pattern: /server\.tool\s*\(\s*["'`]([a-zA-Z_$][\w$]*)["'`]/g,
+    fileTypes: ['.js', '.ts'],
+    isSpoofingRule: true
   }
 ];
 
@@ -342,6 +458,24 @@ function scanFileContent(filePath, content) {
         }
       }
 
+      // Handle spoofing rules: extract tool name and check Levenshtein distance
+      if (rule.isSpoofingRule) {
+        const toolName = match[1];
+        if (!toolName) continue;
+        const spoof = findSpoofedTool(toolName);
+        if (!spoof) continue;
+        findings.push({
+          rule: rule.id,
+          severity: rule.severity,
+          category: rule.category,
+          message: `Tool name "${toolName}" is ${spoof.distance} edit(s) away from well-known tool "${spoof.spoofed}". This may be a spoofing attack.`,
+          file: filePath,
+          line: lineNumber,
+          match: match[0].substring(0, 100)
+        });
+        continue;
+      }
+
       findings.push({
         rule: rule.id,
         severity: rule.severity,
@@ -407,6 +541,30 @@ function generateRecommendations(findings) {
     if (findings.some(f => f.rule.includes('auth'))) {
       recommendations.push('Add authentication for network-accessible MCP servers (e.g., bearer tokens, API keys).');
     }
+  }
+
+  if (categories.has('unicode-poisoning')) {
+    if (findings.some(f => f.rule === 'mcp.unicode-zero-width')) {
+      recommendations.push('Zero-width Unicode characters detected. Search for and remove U+200B, U+200C, U+200D, U+FEFF, U+2060 from all tool names and descriptions — these are used to hide injected instructions.');
+    }
+    if (findings.some(f => f.rule === 'mcp.unicode-bidi-override')) {
+      recommendations.push('Bidirectional override characters detected. These make source code appear differently in text editors than how it executes — a known code obfuscation technique. Remove all bidi formatting characters from source.');
+    }
+    if (findings.some(f => f.rule === 'mcp.unicode-homoglyph' || f.rule === 'mcp.manifest-name-spoofing')) {
+      recommendations.push('Cyrillic homoglyph characters detected adjacent to ASCII. Verify all tool names use only ASCII characters to prevent visual spoofing of legitimate tool names (Adversa TOP25 #9).');
+    }
+  }
+
+  if (categories.has('description-injection')) {
+    recommendations.push('Tool descriptions must describe functionality only. Remove any imperative language or instructions directed at the LLM — this is a tool poisoning attack vector (Adversa TOP25 #2).');
+  }
+
+  if (categories.has('tool-name-spoofing')) {
+    recommendations.push('Tool names closely matching well-known MCP tools may be spoofing attacks. Verify all registered tool names are intentional and do not mimic legitimate tools (Adversa TOP25 #9).');
+  }
+
+  if (categories.has('rug-pull')) {
+    recommendations.push('Tool schema changed since baseline. Run with update_baseline:true only after manually verifying all changes. Rug pull attacks modify tool behavior after initial user approval (Adversa TOP25 #6).');
   }
 
   if (recommendations.length === 0) {
@@ -497,10 +655,154 @@ function formatFull(serverPath, filesScanned, findings, grade, scannedFiles) {
 }
 
 // ============================================================
+// Rug pull detection (baseline hashing)
+// ============================================================
+
+const BASELINE_FILENAME = '.mcp-security-baseline.json';
+
+function hashTool(tool) {
+  return createHash('sha256')
+    .update(JSON.stringify({ name: tool.name, description: tool.description }))
+    .digest('hex');
+}
+
+function buildBaseline(manifestPath) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+  const hashes = {};
+  for (const tool of (manifest.tools || [])) {
+    hashes[tool.name] = hashTool(tool);
+  }
+  return hashes;
+}
+
+function writeBaseline(serverDir, hashes) {
+  const baselinePath = join(serverDir, BASELINE_FILENAME);
+  writeFileSync(baselinePath, JSON.stringify({ version: 1, tools: hashes }, null, 2), 'utf-8');
+}
+
+function checkRugPull(manifestPath, serverDir) {
+  const baselinePath = join(serverDir, BASELINE_FILENAME);
+  if (!existsSync(baselinePath)) return []; // no baseline yet
+
+  let baseline;
+  try {
+    baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
+  } catch {
+    return [];
+  }
+
+  const current = buildBaseline(manifestPath);
+  if (!current) return [];
+
+  const baselineHashes = baseline.tools || {};
+  const findings = [];
+
+  for (const [name, hash] of Object.entries(current)) {
+    if (!baselineHashes[name]) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `New tool "${name}" appeared since baseline was recorded. Verify this addition is intentional (Adversa TOP25 #6).`,
+        file: basename(BASELINE_FILENAME),
+        line: 1,
+        match: name
+      });
+    } else if (baselineHashes[name] !== hash) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `Tool "${name}" schema/description changed since baseline. Rug pull indicator — verify the change is intentional (Adversa TOP25 #6).`,
+        file: basename(BASELINE_FILENAME),
+        line: 1,
+        match: name
+      });
+    }
+  }
+
+  // Also flag tools that were in the baseline but are now gone
+  for (const [name] of Object.entries(baselineHashes)) {
+    if (!current[name]) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `Tool "${name}" was removed since baseline was recorded. Verify this removal is intentional (Adversa TOP25 #6).`,
+        file: basename(BASELINE_FILENAME),
+        line: 1,
+        match: name
+      });
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
+// Manifest scanning (server.json)
+// ============================================================
+
+function scanManifest(manifestPath) {
+  let raw;
+  try {
+    raw = readFileSync(manifestPath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch {
+    return [{ rule: 'mcp.manifest-parse-error', severity: 'WARNING', category: 'manifest', message: 'server.json is not valid JSON.', file: manifestPath, line: 1, match: '' }];
+  }
+
+  const findings = [];
+  const tools = manifest.tools || [];
+
+  for (const tool of tools) {
+    const name = tool.name || '';
+    const description = tool.description || '';
+
+    // Zero-width chars in name or description
+    if (MANIFEST_ZERO_WIDTH.test(description) || MANIFEST_ZERO_WIDTH.test(name)) {
+      findings.push({ rule: 'mcp.unicode-zero-width', severity: 'ERROR', category: 'unicode-poisoning', message: 'Zero-width Unicode character in manifest tool name or description.', file: manifestPath, line: 1, match: name });
+    }
+    // Bidi overrides
+    if (MANIFEST_BIDI.test(description) || MANIFEST_BIDI.test(name)) {
+      findings.push({ rule: 'mcp.unicode-bidi-override', severity: 'ERROR', category: 'unicode-poisoning', message: 'Bidirectional override character in manifest tool name or description.', file: manifestPath, line: 1, match: name });
+    }
+    // Description injection phrases
+    if (MANIFEST_INJECTION_PHRASES.test(description)) {
+      findings.push({ rule: 'mcp.manifest-description-injection', severity: 'ERROR', category: 'description-injection', message: `Tool "${name}" description contains injection language. Likely tool poisoning (Adversa TOP25 #2).`, file: manifestPath, line: 1, match: description.substring(0, 100) });
+    }
+    // Tool name spoofing
+    if (name) {
+      const spoof = findSpoofedTool(name);
+      if (spoof) {
+        findings.push({ rule: 'mcp.manifest-name-spoofing', severity: 'ERROR', category: 'tool-name-spoofing', message: `Manifest tool name "${name}" is ${spoof.distance} edit(s) away from well-known tool "${spoof.spoofed}" (Adversa TOP25 #9).`, file: manifestPath, line: 1, match: name });
+      }
+    }
+    // Suspiciously long description
+    if (description.length > 500) {
+      findings.push({ rule: 'mcp.manifest-description-too-long', severity: 'WARNING', category: 'description-injection', message: `Tool "${name}" description is ${description.length} chars — unusually long descriptions often contain hidden instructions.`, file: manifestPath, line: 1, match: description.substring(0, 100) });
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
 // Main handler
 // ============================================================
 
-export async function scanMcpServer({ server_path, verbosity }) {
+export async function scanMcpServer({ server_path, verbosity, manifest, update_baseline }) {
   const resolvedPath = resolve(server_path);
 
   if (!existsSync(resolvedPath)) {
@@ -509,10 +811,13 @@ export async function scanMcpServer({ server_path, verbosity }) {
     };
   }
 
+  // Compute once; used in multiple places below
+  const isDir = statSync(resolvedPath).isDirectory();
+
   // Collect files to scan
   const files = collectFiles(resolvedPath);
 
-  if (files.length === 0) {
+  if (files.length === 0 && !manifest) {
     return {
       content: [{ type: "text", text: JSON.stringify({
         server_path: resolvedPath,
@@ -527,6 +832,33 @@ export async function scanMcpServer({ server_path, verbosity }) {
   // Scan each file
   const allFindings = [];
 
+  // Manifest scan (server.json) — when manifest:true is passed
+  if (manifest) {
+    const serverDir = isDir ? resolvedPath : resolve(resolvedPath, '..');
+    const manifestPath = join(serverDir, 'server.json');
+    if (existsSync(manifestPath)) {
+      // Update baseline if requested (do this BEFORE checking for rug pull)
+      if (update_baseline) {
+        const hashes = buildBaseline(manifestPath);
+        if (hashes) writeBaseline(serverDir, hashes);
+      }
+
+      const manifestFindings = scanManifest(manifestPath);
+      // Relativize manifest finding paths
+      for (const f of manifestFindings) {
+        f.file = relative(serverDir, f.file) || basename(f.file);
+      }
+      allFindings.push(...manifestFindings);
+
+      // Rug pull check (only when NOT writing baseline)
+      if (!update_baseline) {
+        const rugPullFindings = checkRugPull(manifestPath, serverDir);
+        // BASELINE_FILENAME is already relative, no need to relativize
+        allFindings.push(...rugPullFindings);
+      }
+    }
+  }
+
   for (const filePath of files) {
     let content;
     try {
@@ -538,7 +870,7 @@ export async function scanMcpServer({ server_path, verbosity }) {
     const fileFindings = scanFileContent(filePath, content);
 
     // Convert absolute paths to relative for output readability
-    const basePath = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+    const basePath = isDir ? resolvedPath : resolve(resolvedPath, '..');
     for (const finding of fileFindings) {
       finding.file = relative(basePath, finding.file) || basename(finding.file);
     }
@@ -559,24 +891,26 @@ export async function scanMcpServer({ server_path, verbosity }) {
   const severityOrder = { ERROR: 0, WARNING: 1, INFO: 2 };
   dedupedFindings.sort((a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2));
 
-  const grade = calculateGrade(dedupedFindings, files.length);
+  // When manifest-only scan has findings, count it as 1 "file" for grading purposes
+  const effectiveFilesScanned = files.length + (manifest && dedupedFindings.length > 0 ? 1 : 0);
+  const grade = calculateGrade(dedupedFindings, effectiveFilesScanned);
   const level = verbosity || 'compact';
 
   // Relativize scanned file list
-  const basePath = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+  const basePath = isDir ? resolvedPath : resolve(resolvedPath, '..');
   const scannedFiles = files.map(f => relative(basePath, f) || basename(f));
 
   let result;
   switch (level) {
     case 'minimal':
-      result = formatMinimal(resolvedPath, files.length, dedupedFindings, grade);
+      result = formatMinimal(resolvedPath, effectiveFilesScanned, dedupedFindings, grade);
       break;
     case 'full':
-      result = formatFull(resolvedPath, files.length, dedupedFindings, grade, scannedFiles);
+      result = formatFull(resolvedPath, effectiveFilesScanned, dedupedFindings, grade, scannedFiles);
       break;
     case 'compact':
     default:
-      result = formatCompact(resolvedPath, files.length, dedupedFindings, grade);
+      result = formatCompact(resolvedPath, effectiveFilesScanned, dedupedFindings, grade);
   }
 
   return {
