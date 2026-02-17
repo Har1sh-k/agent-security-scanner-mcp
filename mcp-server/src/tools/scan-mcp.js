@@ -715,6 +715,9 @@ export async function scanMcpServer({ server_path, verbosity, manifest }) {
     };
   }
 
+  // Compute once; used in multiple places below
+  const isDir = statSync(resolvedPath).isDirectory();
+
   // Collect files to scan
   const files = collectFiles(resolvedPath);
 
@@ -735,10 +738,15 @@ export async function scanMcpServer({ server_path, verbosity, manifest }) {
 
   // Manifest scan (server.json) — when manifest:true is passed
   if (manifest) {
-    const serverDir = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+    const serverDir = isDir ? resolvedPath : resolve(resolvedPath, '..');
     const manifestPath = join(serverDir, 'server.json');
     if (existsSync(manifestPath)) {
       const manifestFindings = scanManifest(manifestPath);
+      // Relativize manifest finding paths to match source file path style
+      const basePath2 = isDir ? resolvedPath : resolve(resolvedPath, '..');
+      for (const f of manifestFindings) {
+        f.file = relative(basePath2, f.file) || basename(f.file);
+      }
       allFindings.push(...manifestFindings);
     }
   }
@@ -754,7 +762,7 @@ export async function scanMcpServer({ server_path, verbosity, manifest }) {
     const fileFindings = scanFileContent(filePath, content);
 
     // Convert absolute paths to relative for output readability
-    const basePath = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+    const basePath = isDir ? resolvedPath : resolve(resolvedPath, '..');
     for (const finding of fileFindings) {
       finding.file = relative(basePath, finding.file) || basename(finding.file);
     }
@@ -775,24 +783,26 @@ export async function scanMcpServer({ server_path, verbosity, manifest }) {
   const severityOrder = { ERROR: 0, WARNING: 1, INFO: 2 };
   dedupedFindings.sort((a, b) => (severityOrder[a.severity] ?? 2) - (severityOrder[b.severity] ?? 2));
 
-  const grade = calculateGrade(dedupedFindings, files.length);
+  // When manifest-only scan has findings, count it as 1 "file" for grading purposes
+  const effectiveFilesScanned = files.length + (manifest && dedupedFindings.length > 0 ? 1 : 0);
+  const grade = calculateGrade(dedupedFindings, effectiveFilesScanned);
   const level = verbosity || 'compact';
 
   // Relativize scanned file list
-  const basePath = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+  const basePath = isDir ? resolvedPath : resolve(resolvedPath, '..');
   const scannedFiles = files.map(f => relative(basePath, f) || basename(f));
 
   let result;
   switch (level) {
     case 'minimal':
-      result = formatMinimal(resolvedPath, files.length, dedupedFindings, grade);
+      result = formatMinimal(resolvedPath, effectiveFilesScanned, dedupedFindings, grade);
       break;
     case 'full':
-      result = formatFull(resolvedPath, files.length, dedupedFindings, grade, scannedFiles);
+      result = formatFull(resolvedPath, effectiveFilesScanned, dedupedFindings, grade, scannedFiles);
       break;
     case 'compact':
     default:
-      result = formatCompact(resolvedPath, files.length, dedupedFindings, grade);
+      result = formatCompact(resolvedPath, effectiveFilesScanned, dedupedFindings, grade);
   }
 
   return {
