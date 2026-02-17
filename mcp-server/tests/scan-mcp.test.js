@@ -368,5 +368,30 @@ server.tool("greet", "Say hello", {}, async (p) => {});
       expect(rules).toContain('mcp.rug-pull-detected');
       cleanupTempDir();
     });
+
+    it('detects rug pull when tool removed after baseline', async () => {
+      setupTempDir();
+      const original = { tools: [{ name: "readFile", description: "Read a file." }, { name: "writeFile", description: "Write a file." }] };
+      writeFileSync(join(TEMP_DIR, 'server.json'), JSON.stringify(original));
+      await scanMcpServer({ server_path: TEMP_DIR, manifest: true, update_baseline: true });
+      // Remove writeFile
+      const changed = { tools: [{ name: "readFile", description: "Read a file." }] };
+      writeFileSync(join(TEMP_DIR, 'server.json'), JSON.stringify(changed));
+      const result = parseResult(await scanMcpServer({ server_path: TEMP_DIR, manifest: true }));
+      const rules = result.findings.map(f => f.rule);
+      expect(rules).toContain('mcp.rug-pull-detected');
+      cleanupTempDir();
+    });
+
+    it('produces no rug pull findings when no baseline exists', async () => {
+      setupTempDir();
+      const manifest = { tools: [{ name: "readFile", description: "Read a file." }] };
+      writeFileSync(join(TEMP_DIR, 'server.json'), JSON.stringify(manifest));
+      // Scan WITHOUT writing baseline first
+      const result = parseResult(await scanMcpServer({ server_path: TEMP_DIR, manifest: true }));
+      const rugPullFindings = result.findings.filter(f => f.rule === 'mcp.rug-pull-detected');
+      expect(rugPullFindings.length).toBe(0);
+      cleanupTempDir();
+    });
   });
 });

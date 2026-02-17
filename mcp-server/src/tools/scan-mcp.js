@@ -709,7 +709,7 @@ function checkRugPull(manifestPath, serverDir) {
         severity: 'ERROR',
         category: 'rug-pull',
         message: `New tool "${name}" appeared since baseline was recorded. Verify this addition is intentional (Adversa TOP25 #6).`,
-        file: BASELINE_FILENAME,
+        file: basename(BASELINE_FILENAME),
         line: 1,
         match: name
       });
@@ -719,7 +719,22 @@ function checkRugPull(manifestPath, serverDir) {
         severity: 'ERROR',
         category: 'rug-pull',
         message: `Tool "${name}" schema/description changed since baseline. Rug pull indicator — verify the change is intentional (Adversa TOP25 #6).`,
-        file: BASELINE_FILENAME,
+        file: basename(BASELINE_FILENAME),
+        line: 1,
+        match: name
+      });
+    }
+  }
+
+  // Also flag tools that were in the baseline but are now gone
+  for (const [name] of Object.entries(baselineHashes)) {
+    if (!current[name]) {
+      findings.push({
+        rule: 'mcp.rug-pull-detected',
+        severity: 'ERROR',
+        category: 'rug-pull',
+        message: `Tool "${name}" was removed since baseline was recorded. Verify this removal is intentional (Adversa TOP25 #6).`,
+        file: basename(BASELINE_FILENAME),
         line: 1,
         match: name
       });
