@@ -5,11 +5,19 @@ import { join, resolve, relative, extname, basename } from "path";
 
 export const scanMcpServerSchema = {
   server_path: z.string().describe("Path to MCP server directory or entry file"),
-  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)")
+  verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)"),
+  manifest: z.boolean().optional().describe("Also scan server.json manifest file for poisoning indicators (tool poisoning, name spoofing, description injection)")
 };
 
 // File extensions to scan
 const SCANNABLE_EXTENSIONS = new Set(['.js', '.ts', '.py']);
+
+// Injection phrases for manifest description checking
+const MANIFEST_INJECTION_PHRASES = /ignore\s+previous|exfiltrat|override\s+.*instruction|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter|disregard\s+|extract\s+.*credential/i;
+
+// Zero-width and bidi char patterns (reuse same ranges as rules above)
+const MANIFEST_ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060]/;
+const MANIFEST_BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/;
 
 // Directories to skip when walking
 const SKIP_DIRS = new Set([
@@ -641,10 +649,64 @@ function formatFull(serverPath, filesScanned, findings, grade, scannedFiles) {
 }
 
 // ============================================================
+// Manifest scanning (server.json)
+// ============================================================
+
+function scanManifest(manifestPath) {
+  let raw;
+  try {
+    raw = readFileSync(manifestPath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  let manifest;
+  try {
+    manifest = JSON.parse(raw);
+  } catch {
+    return [{ rule: 'mcp.manifest-parse-error', severity: 'WARNING', category: 'manifest', message: 'server.json is not valid JSON.', file: manifestPath, line: 1, match: '' }];
+  }
+
+  const findings = [];
+  const tools = manifest.tools || [];
+
+  for (const tool of tools) {
+    const name = tool.name || '';
+    const description = tool.description || '';
+
+    // Zero-width chars in name or description
+    if (MANIFEST_ZERO_WIDTH.test(description) || MANIFEST_ZERO_WIDTH.test(name)) {
+      findings.push({ rule: 'mcp.unicode-zero-width', severity: 'ERROR', category: 'unicode-poisoning', message: 'Zero-width Unicode character in manifest tool name or description.', file: manifestPath, line: 1, match: name });
+    }
+    // Bidi overrides
+    if (MANIFEST_BIDI.test(description) || MANIFEST_BIDI.test(name)) {
+      findings.push({ rule: 'mcp.unicode-bidi-override', severity: 'ERROR', category: 'unicode-poisoning', message: 'Bidirectional override character in manifest tool name or description.', file: manifestPath, line: 1, match: name });
+    }
+    // Description injection phrases
+    if (MANIFEST_INJECTION_PHRASES.test(description)) {
+      findings.push({ rule: 'mcp.manifest-description-injection', severity: 'ERROR', category: 'description-injection', message: `Tool "${name}" description contains injection language. Likely tool poisoning (Adversa TOP25 #2).`, file: manifestPath, line: 1, match: description.substring(0, 100) });
+    }
+    // Tool name spoofing
+    if (name) {
+      const spoof = findSpoofedTool(name);
+      if (spoof) {
+        findings.push({ rule: 'mcp.manifest-name-spoofing', severity: 'ERROR', category: 'tool-name-spoofing', message: `Manifest tool name "${name}" is ${spoof.distance} edit(s) away from well-known tool "${spoof.spoofed}" (Adversa TOP25 #9).`, file: manifestPath, line: 1, match: name });
+      }
+    }
+    // Suspiciously long description
+    if (description.length > 500) {
+      findings.push({ rule: 'mcp.manifest-description-too-long', severity: 'WARNING', category: 'description-injection', message: `Tool "${name}" description is ${description.length} chars — unusually long descriptions often contain hidden instructions.`, file: manifestPath, line: 1, match: description.substring(0, 100) });
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
 // Main handler
 // ============================================================
 
-export async function scanMcpServer({ server_path, verbosity }) {
+export async function scanMcpServer({ server_path, verbosity, manifest }) {
   const resolvedPath = resolve(server_path);
 
   if (!existsSync(resolvedPath)) {
@@ -656,7 +718,7 @@ export async function scanMcpServer({ server_path, verbosity }) {
   // Collect files to scan
   const files = collectFiles(resolvedPath);
 
-  if (files.length === 0) {
+  if (files.length === 0 && !manifest) {
     return {
       content: [{ type: "text", text: JSON.stringify({
         server_path: resolvedPath,
@@ -670,6 +732,16 @@ export async function scanMcpServer({ server_path, verbosity }) {
 
   // Scan each file
   const allFindings = [];
+
+  // Manifest scan (server.json) — when manifest:true is passed
+  if (manifest) {
+    const serverDir = statSync(resolvedPath).isDirectory() ? resolvedPath : resolve(resolvedPath, '..');
+    const manifestPath = join(serverDir, 'server.json');
+    if (existsSync(manifestPath)) {
+      const manifestFindings = scanManifest(manifestPath);
+      allFindings.push(...manifestFindings);
+    }
+  }
 
   for (const filePath of files) {
     let content;
