@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, writeFileSync, copyFileSync, mkdirSync } from "fs";
+import { spawnSync } from "child_process";
 import { dirname, join } from "path";
 import { homedir, platform } from "os";
 import { createInterface } from "readline";
@@ -79,6 +80,10 @@ const CLIENT_CONFIGS = {
     isSkillBased: true, // OpenClaw uses skills, not MCP config
     skillPath: () => join(homedir(), '.openclaw', 'workspace', 'skills', 'security-scanner'),
     configPath: () => join(homedir(), '.openclaw', 'workspace', 'skills', 'security-scanner', 'SKILL.md')
+  },
+  'codex': {
+    name: 'Codex',
+    isCLIBased: true // Codex uses 'codex mcp add' CLI, not a JSON config
   }
 };
 
@@ -237,6 +242,51 @@ async function installOpenClawSkill(client, flags) {
   console.log(`    - Or ask: "scan this prompt for security issues"\n`);
 }
 
+// Installer for Codex (CLI-based, uses 'codex mcp add')
+async function installCodexMCP(flags, serverName) {
+  console.log(`\n  Client:  Codex`);
+  console.log(`  Config:  ~/.codex/config.toml (managed by codex CLI)`);
+  console.log(`  OS:      ${platform()} (${process.arch})\n`);
+
+  // Check codex CLI is available
+  const which = spawnSync('which', ['codex'], { encoding: 'utf-8' });
+  if (which.status !== 0) {
+    console.error(`  ERROR: 'codex' CLI not found in PATH.`);
+    console.error(`  Install it first: https://github.com/openai/codex\n`);
+    process.exit(1);
+  }
+
+  if (flags.dryRun) {
+    console.log(`  [dry-run] Would run:`);
+    console.log(`    codex mcp add ${serverName} -- npx -y agent-security-scanner-mcp`);
+    console.log(`  No changes made.\n`);
+    process.exit(0);
+  }
+
+  console.log(`  Running: codex mcp add ${serverName} -- npx -y agent-security-scanner-mcp\n`);
+
+  const result = spawnSync(
+    'codex',
+    ['mcp', 'add', serverName, '--', 'npx', '-y', 'agent-security-scanner-mcp'],
+    { encoding: 'utf-8', stdio: 'inherit' }
+  );
+
+  if (result.status !== 0) {
+    console.error(`\n  ERROR: 'codex mcp add' failed (exit ${result.status}).`);
+    console.error(`  You can add it manually to ~/.codex/config.toml:\n`);
+    console.error(`    [mcp_servers.${serverName}]`);
+    console.error(`    command = "npx"`);
+    console.error(`    args = ["-y", "agent-security-scanner-mcp"]\n`);
+    process.exit(1);
+  }
+
+  console.log(`\n  Codex MCP server '${serverName}' registered successfully!`);
+  console.log(`\n  Next steps:`);
+  console.log(`    1. Start a Codex session`);
+  console.log(`    2. Run /mcp to verify 'agentic-security' is listed`);
+  console.log(`    3. Quick test: ask Codex to run scan_security on any code file\n`);
+}
+
 export async function runInit(args) {
   const flags = parseInitFlags(args);
   let clientName = flags.client;
@@ -261,6 +311,12 @@ export async function runInit(args) {
   // Special handling for OpenClaw (skill-based, not MCP config)
   if (client.isSkillBased) {
     await installOpenClawSkill(client, flags);
+    return;
+  }
+
+  // Special handling for Codex (CLI-based, uses 'codex mcp add')
+  if (client.isCLIBased) {
+    await installCodexMCP(flags, flags.name);
     return;
   }
 
