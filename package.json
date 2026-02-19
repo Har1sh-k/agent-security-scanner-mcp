@@ -1,6 +1,6 @@
 {
   "name": "agent-security-scanner-mcp",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "mcpName": "io.github.sinewaveai/agent-security-scanner-mcp",
   "description": "Security scanner MCP server for AI coding agents. Prompt injection firewall, package hallucination detection (4.3M+ packages), 1000+ vulnerability rules with AST & taint analysis, auto-fix. For Claude Code, Cursor, Windsurf, Cline, OpenClaw.",
   "main": "index.js",
@@ -90,6 +90,9 @@
     "src/config.js",
     "src/history.js",
     "src/typosquat.js",
+    "src/plugin-config.js",
+    "src/plugin-health.js",
+    "openclaw.plugin.json",
     "templates/**",
     "analyzer.py",
     "ast_parser.py",

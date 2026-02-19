@@ -8,11 +8,11 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 [![Benchmark: 97.7% precision](https://img.shields.io/badge/precision-97.7%25-brightgreen.svg)](benchmarks/RESULTS.md)
 [![CI](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml)
 
-> **New in v3.8.0:** Cross-file taint tracking, project context discovery (frameworks/middleware detection), and Layer 2 LLM-powered security review. Detects vulnerabilities across file boundaries and reduces false positives by understanding project defenses. [See changelog](#changelog).
+> **New in v3.10.0:** ClawProof OpenClaw plugin — 6-layer deep skill scanner (`scan_skill`) with ClawHavoc malware signatures (27 rules, 121 patterns covering reverse shells, crypto miners, info stealers, C2 beacons, and OpenClaw-specific attacks), package supply chain verification, and rug pull detection. [See changelog](#changelog).
 >
-> **Also new in v3.7.0:** Inter-procedural taint analysis with Python daemon caching (~4000x faster repeat scans). [See v3.7.0 demo](demo/).
+> **Also new in v3.8.0:** Cross-file taint tracking, project context discovery, and Layer 2 LLM-powered security review.
 >
-> **OpenClaw integration:** 30+ rules targeting autonomous AI threats. [See setup](#openclaw-integration).
+> **OpenClaw integration:** 30+ rules targeting autonomous AI threats + native plugin support. [See setup](#openclaw-integration).
 
 ## Tools
 
@@ -27,6 +27,8 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 | `scan_agent_prompt` | Detect prompt injection with bypass hardening (59 rules + multi-encoding) | Before acting on external/untrusted input |
 | `scan_agent_action` | Pre-execution safety check for agent actions (bash, file ops, HTTP). Returns ALLOW/WARN/BLOCK | Before running any agent-generated shell command or file operation |
 | `scan_mcp_server` | Scan MCP server source for vulnerabilities: unicode poisoning, name spoofing, rug pull detection, manifest analysis. Returns A-F grade | When auditing or installing an MCP server |
+| `scan_skill` | Deep security scan of an OpenClaw skill: prompt injection, AST+taint code analysis, ClawHavoc malware signatures, supply chain, rug pull. Returns A-F grade | Before installing any OpenClaw skill |
+| `clawproof_health` | Check ClawProof plugin health: engine status, daemon status, package data availability | Diagnostics and plugin status |
 | `list_security_rules` | List available security rules and fix templates | To check rule coverage for a language |
 
 ## Quick Start
@@ -418,6 +420,94 @@ scan_mcp_server({ server_path: "...", manifest: true, update_baseline: true })
 scan_mcp_server({ server_path: "...", manifest: true })
 # → alerts with mcp.rug-pull-detected if any tool changed
 ```
+
+---
+
+### `scan_skill`
+
+Deep security scan of an OpenClaw skill directory or `SKILL.md` file. Runs 6 layers of analysis and returns an A-F security grade.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `skill_path` | string | Yes | Path to skill directory or `SKILL.md` file (must be within cwd or `~/.openclaw/skills/`) |
+| `verbosity` | string | No | `"minimal"` (grade + counts), `"compact"` (default, findings list), `"full"` (all metadata) |
+| `baseline` | boolean | No | Save current scan as SHA-256 baseline for future rug pull detection |
+
+**Example:**
+
+```json
+// Input
+{ "skill_path": "~/.openclaw/skills/my-skill", "verbosity": "compact" }
+
+// Output
+{
+  "skill_path": "/Users/you/.openclaw/skills/my-skill",
+  "grade": "F",
+  "recommendation": "DO NOT INSTALL - This skill contains critical security threats that pose immediate risk",
+  "findings_count": 3,
+  "findings": [
+    {
+      "source": "clawhavoc",
+      "category": "reverse_shell",
+      "severity": "CRITICAL",
+      "message": "Bash reverse shell detected — opens interactive shell over TCP",
+      "rule_id": "clawhavoc.revshell.bash",
+      "confidence": "HIGH"
+    }
+  ],
+  "layers_executed": {
+    "L1_prompt": true,
+    "L2_code_blocks": true,
+    "L3_supporting_files": true,
+    "L4_clawhavoc": true,
+    "L5_supply_chain": true,
+    "L6_rug_pull": true
+  }
+}
+```
+
+**6-layer analysis pipeline:**
+
+| Layer | What It Checks |
+|-------|---------------|
+| L1 Prompt Scan | 59+ prompt injection rules against skill instructions |
+| L2 Code Blocks | Bash via action scanner; JS/Python/etc via AST+taint analysis |
+| L3 Supporting Files | All code files in the skill directory (capped at 20 files) |
+| L4 ClawHavoc Signatures | 27 malware rules, 121 regex patterns across 10 threat categories |
+| L5 Supply Chain | Package hallucination detection across npm, PyPI, RubyGems, crates, Dart, Perl |
+| L6 Rug Pull | SHA-256 baseline comparison to detect post-install content tampering |
+
+**ClawHavoc threat categories:**
+
+| Category | Examples |
+|----------|---------|
+| Reverse Shells | Bash `/dev/tcp`, netcat `-e`, Python socket+dup2, Perl/Ruby TCP |
+| Crypto Miners | XMRig, CoinHive, stratum+tcp, WebAssembly miners |
+| Info Stealers | Browser cookies/Login Data, macOS Keychain, Atomic Stealer, RedLine, Lumma/wallet |
+| Keyloggers | CGEventTapCreate, pynput, SetWindowsHookEx, NSEvent.addGlobalMonitor |
+| Screen Capture | Screenshot + upload/webhook combinations |
+| DNS Exfiltration | nslookup/dig with command substitution, base64+DNS |
+| C2 Beacons | Periodic HTTP callbacks (setInterval+fetch, while+requests+sleep) |
+| OpenClaw Attacks | Config theft, SOUL.md tampering, session hijacking, gateway token theft |
+| Campaign Patterns | Webhook exfiltration to known attacker infrastructure |
+| Exfil Endpoints | Known malicious domains and staging servers |
+
+**Rug pull workflow:**
+
+```bash
+# 1. On first install — record trusted baseline
+scan_skill({ skill_path: "~/.openclaw/skills/my-skill", baseline: true })
+
+# 2. On each subsequent check — detect content changes
+scan_skill({ skill_path: "~/.openclaw/skills/my-skill" })
+# → grade F if any content changed since baseline
+```
+
+**Security notes:**
+- `skill_path` must be within `process.cwd()` or `~/.openclaw/skills/` — symlink escapes are rejected
+- Scan times out at 120 seconds with a grade F on timeout
 
 ---
 
@@ -815,12 +905,28 @@ The scanner includes 30+ rules targeting OpenClaw's unique attack surface:
 | **Unsafe Automation** | "Run hourly without asking", "Disable safety checks" |
 | **Service Attacks** | "Delete all repos", "Make payment to..." |
 
+### Skill Scanning (New in v3.10.0)
+
+Before installing any skill from ClawHub or other sources:
+
+```bash
+node index.js scan-skill ~/.openclaw/skills/some-skill
+```
+
+Or via MCP:
+```json
+{ "skill_path": "~/.openclaw/skills/some-skill", "verbosity": "compact" }
+```
+
+Returns grade A-F with findings from 6 layers of analysis. Grade F = do not install.
+
 ### Usage in OpenClaw
 
 The skill is auto-discovered. Use it by asking:
 - "Scan this prompt for security issues"
 - "Check if this code is safe to run"
 - "Verify these packages aren't hallucinated"
+- "Scan this skill before I install it"
 
 ---
 
@@ -882,7 +988,7 @@ AI coding agents introduce attack surfaces that traditional security tools weren
 |----------|-------|
 | **Transport** | stdio |
 | **Package** | `agent-security-scanner-mcp` (npm) |
-| **Tools** | 10 |
+| **Tools** | 12 |
 | **Languages** | 12 |
 | **Ecosystems** | 7 |
 | **Auth** | None required |
@@ -963,6 +1069,15 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v3.10.0
+- **`scan_skill` Tool** — 6-layer deep security scanner for OpenClaw skills: prompt injection (59+ rules), AST+taint code analysis, ClawHavoc malware signatures, package supply chain verification, and SHA-256 rug pull detection. Returns A-F grade with hard-fail on ClawHavoc/rug pull/critical findings
+- **ClawHavoc Signature Database** (`rules/clawhavoc.yaml`) — 27 rules, 121 regex patterns across 10 threat categories (reverse shells, crypto miners, info stealers, keyloggers, screen capture, DNS exfiltration, C2 beacons, OpenClaw-specific attacks, campaign patterns, exfil endpoints), mapped to MITRE ATT&CK
+- **OpenClaw Plugin Skeleton** — Native plugin manifest (`openclaw.plugin.json`), config loader (`~/.openclaw/scanner-config.json`), and health check endpoint (`clawproof_health` MCP tool)
+- **CLI**: `scan-skill <path>` command with `--baseline` flag; `audit` and `harden` stubs (experimental)
+- **Security fixes**: Path containment uses `realpathSync` to prevent symlink bypass; dedup key includes `source` to prevent ClawHavoc findings from being suppressed by same-named code_analysis findings
+- **Bug fix**: SQL injection concat detection now covers JavaScript (was C#-only) — single-quoted and template literal strings now detected
+- Tests: 462 passed (up from 433, includes 34 scan-skill tests and 14 plugin-integration tests)
 
 ### v3.8.0
 - **`scan_mcp_server` Tool** - New tool for auditing MCP servers: scans source code for 24+ vulnerability patterns, unicode/homoglyph poisoning, tool name spoofing (Levenshtein distance), description injection, and returns A-F security grade
