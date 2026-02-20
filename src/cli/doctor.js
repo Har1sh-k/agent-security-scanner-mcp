@@ -3,6 +3,7 @@ import { readFileSync, existsSync, writeFileSync, copyFileSync, mkdirSync } from
 import { dirname, join } from "path";
 import { homedir, platform } from "os";
 import { fileURLToPath } from "url";
+import { getDaemonClient } from '../daemon-client.js';
 
 // Handle both ESM and CJS bundling (Smithery bundles to CJS)
 let __dirname;
@@ -156,6 +157,18 @@ export async function runDoctor(args) {
     console.log(`    \u2713 daemon.py found`);
   } else {
     console.log(`    \u26a0 daemon.py not found (daemon mode unavailable, sync fallback will be used)`);
+  }
+
+  // 3c. Daemon live health check
+  if (existsSync(daemonPath) && pythonCmd) {
+    try {
+      const client = getDaemonClient();
+      const health = await client.health();
+      console.log(`    \u2713 Daemon responding (pid=${health.pid}, cache=${health.cache_size}, uptime=${health.uptime.toFixed(1)}s)`);
+      await client.shutdown();
+    } catch (e) {
+      console.log(`    \u26a0 Daemon health check failed: ${e.message}`);
+    }
   }
 
   // 4. Python can import yaml (analyzer dependency check)

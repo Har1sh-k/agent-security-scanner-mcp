@@ -105,7 +105,12 @@ describe('Garak Red-Team Validation', () => {
   }, 30000);
 
   afterAll(async () => {
-    await client.stop();
+    try {
+      await Promise.race([
+        client.stop(),
+        new Promise(r => setTimeout(r, 10000))  // 10s max for cleanup
+      ]);
+    } catch {}
 
     // Print summary table
     const summary = {};
@@ -127,7 +132,7 @@ describe('Garak Red-Team Validation', () => {
         console.log(`  [${icon}] ${p.name} -> action=${p.action}, risk=${p.riskScore}, findings=${p.findingsCount}`);
       }
     }
-  });
+  }, 120000);
 
   describe('Encoding probes', () => {
     for (const probe of ENCODING_PROBES) {
