@@ -13,7 +13,7 @@ try {
 
 const DAEMON_SCRIPT = join(__dirname, '..', 'daemon.py');
 const READY_TIMEOUT = 15000;   // 15s to wait for __ready__ signal
-const REQUEST_TIMEOUT = 30000; // 30s per request
+const REQUEST_TIMEOUT = 45000; // 45s per request (increased for large files in Codex/complex analysis)
 const MAX_RESTARTS = 3;
 const RESTART_WINDOW = 60000;  // 60s window for restart counting
 

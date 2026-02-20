@@ -86,7 +86,7 @@ export function runAnalyzer(filePath, engine = 'auto') {
     }
     const result = execFileSync('python3', args, {
       encoding: 'utf-8',
-      timeout: 30000
+      timeout: 45000  // Increased to 45s to match daemon timeout
     });
     return JSON.parse(result);
   } catch (error) {

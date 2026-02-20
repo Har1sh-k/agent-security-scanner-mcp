@@ -1,12 +1,14 @@
 // src/tools/scan-security.js
 import { z } from "zod";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { dirname } from "path";
 import { detectLanguage, runAnalyzerAsync, generateFix, toSarif, getEngineMode, extractImports, isTestFile } from '../utils.js';
 import { deduplicateFindings } from '../dedup.js';
 import { applyContextFilter, detectFrameworks, applyFrameworkAdjustments } from '../context.js';
 import { loadConfig, shouldExcludeFile, applyConfig } from '../config.js';
 import { discoverProjectContext } from './project-context.js';
+
+const MAX_FILE_SIZE = 1024 * 1024;  // 1MB - skip files larger than this to avoid timeouts
 
 export const scanSecuritySchema = {
   file_path: z.string().describe("Path to the file to scan"),
@@ -67,6 +69,26 @@ export async function scanSecurity({ file_path, output_format, verbosity, engine
     return {
       content: [{ type: "text", text: JSON.stringify({ error: "File not found" }) }]
     };
+  }
+
+  // Check file size to avoid timeouts on very large files
+  try {
+    const stats = statSync(file_path);
+    if (stats.size > MAX_FILE_SIZE) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            file: file_path,
+            message: `File too large (${(stats.size / 1024).toFixed(0)}KB). Skipping to avoid timeout. Max size: ${MAX_FILE_SIZE / 1024}KB.`,
+            issues_count: 0,
+            skipped: true
+          })
+        }]
+      };
+    }
+  } catch (err) {
+    // If stat fails, continue anyway
   }
 
   // Load project configuration
