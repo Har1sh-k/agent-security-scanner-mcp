@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] - 2026-02-23
+
+### Added
+- **`scan_skill` MCP Tool** - Scan AI agent skill files (SKILL.md) for prompt injection, jailbreaks, and security issues. Returns A-F security grade with 40+ detection patterns
+- **ClawHub Ecosystem Scanning** - New CLI commands for batch scanning: `scan-clawhub`, `scan-clawhub-safe`, `scan-clawhub-full`
+- **Prompt Injection Detection** - 15 patterns detecting "ignore previous instructions", role manipulation, system overrides, and privilege escalation attempts
+- **Jailbreak Detection** - 4 patterns for DAN mode, developer mode, pretend scenarios, and "no restrictions" attacks
+- **Data Exfiltration Detection** - External URL detection with trusted domain whitelist (github.com, npmjs.org, pypi.org, etc.) and base64 encoding detection
+- **Hidden Instructions Detection** - HTML comments and secret directives detection
+- **Security Grading System** - A-F grading based on point accumulation: A (0), B (1-10), C (11-25), D (26-50), F (51+)
+- **ClawHub Security Reports** - Published comprehensive security analysis of entire ClawHub ecosystem (777 skills scanned, 69.5% with issues, 21.2% Grade F, 4,129 patterns detected)
+- **ClawProof Standalone Package** - Standalone npm package (v1.0.0) for independent skill scanning with CLI: `clawproof scan ./SKILL.md`
+- **CWE Mappings** - All vulnerability detections now include Common Weakness Enumeration codes
+- **Infrastructure Files** - Docker-based scanning environment, GCP deployment scripts, remote scanning capabilities
+- New files: `src/tools/scan-skill-prompt.js`, `src/cli/scan-clawhub.js`, `src/cli/scan-clawhub-safe.js`, `src/cli/scan-clawhub-full.js`
+- New directory: `clawhub-security-reports/` with comprehensive ecosystem analysis
+- New package: `clawproof/` standalone npm package with 17 comprehensive tests
+
+### Changed
+- Added `tar` dependency for ClawHub package downloading
+- Suppressed regex warnings in `analyzer.py` for cleaner output
+- Updated `.gitignore` with generated ClawHub scan data exclusions
+- Enhanced README with ClawHub ecosystem scanning section
+
+### Fixed
+- None
+
+### Migration
+- No migration required. All changes are additive and backward compatible.
+- New features are opt-in via new `scan_skill` MCP tool and `scan-clawhub` CLI commands
+
 ## [3.9.0] - 2026-02-17
 
 ### Added

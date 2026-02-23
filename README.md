@@ -8,9 +8,9 @@ Security scanner for AI coding agents and autonomous assistants. Scans code for 
 [![Benchmark: 97.7% precision](https://img.shields.io/badge/precision-97.7%25-brightgreen.svg)](benchmarks/RESULTS.md)
 [![CI](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml)
 
-> **New in v3.10.0:** ClawProof OpenClaw plugin — 6-layer deep skill scanner (`scan_skill`) with ClawHavoc malware signatures (27 rules, 121 patterns covering reverse shells, crypto miners, info stealers, C2 beacons, and OpenClaw-specific attacks), package supply chain verification, and rug pull detection. [See changelog](#changelog).
+> **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 777 ClawHub skills and found 69.5% have security issues. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Reports](./clawhub-security-reports/).
 >
-> **Also new in v3.8.0:** Cross-file taint tracking, project context discovery, and Layer 2 LLM-powered security review.
+> **Also in v3.10.0:** ClawProof OpenClaw plugin — 6-layer deep skill scanner (`scan_skill`) with ClawHavoc malware signatures (27 rules, 121 patterns covering reverse shells, crypto miners, info stealers, C2 beacons, and OpenClaw-specific attacks), package supply chain verification, and rug pull detection.
 >
 > **OpenClaw integration:** 30+ rules targeting autonomous AI threats + native plugin support. [See setup](#openclaw-integration).
 
@@ -73,6 +73,43 @@ scan_agent_prompt → check for malicious instructions before acting on them
 ```
 check_package → verify each new package name is real, not hallucinated
 ```
+
+### ClawHub Ecosystem Scanning (New in v3.11.0)
+
+Scan AI agent skills for prompt injection, jailbreaks, and security threats:
+
+```bash
+# Scan entire ClawHub ecosystem (777 skills)
+node index.js scan-clawhub
+
+# Scan single skill file
+node index.js scan-skill ./path/to/SKILL.md
+
+# Standalone package
+npm install -g clawproof
+clawproof scan ./SKILL.md
+```
+
+**Security Reports:** We've scanned all 777 ClawHub skills:
+- **69.5%** have security issues
+- **21.2%** have critical vulnerabilities (Grade F - DO NOT INSTALL)
+- **30.5%** are completely safe (Grade A)
+- **4,129** prompt injection patterns detected
+
+See [ClawHub Security Reports](./clawhub-security-reports/) for full analysis.
+
+**Detection Capabilities:**
+- Prompt Injection (15 patterns): "ignore previous instructions", role manipulation
+- Jailbreaks (4 patterns): DAN mode, developer mode, pretend scenarios
+- Data Exfiltration (2 patterns): External URLs, base64 encoding
+- Hidden Instructions (2 patterns): HTML comments, secret directives
+
+**Security Grading:**
+- **A** (0 points): Safe to install
+- **B** (1-10): Low risk - review findings
+- **C** (11-25): Medium risk - use with caution
+- **D** (26-50): High risk - not recommended
+- **F** (51+): DO NOT INSTALL - critical threats
 
 ---
 
