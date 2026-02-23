@@ -467,6 +467,10 @@ if (cliArgs[0] === 'init') {
     console.error(`  Error: ${err.message}\n`);
     process.exit(1);
   });
+} else if (cliArgs[0] === 'scan-clawhub') {
+  // Import and run SAFE ClawHub scanner (no code execution)
+  await import('./src/cli/scan-clawhub-safe.js');
+  // Exit is handled by scan-clawhub-safe.js
 } else if (cliArgs[0] === '--help' || cliArgs[0] === '-h' || cliArgs[0] === 'help') {
   console.log('\n  agent-security-scanner-mcp\n');
   console.log('  Commands:');
@@ -480,6 +484,7 @@ if (cliArgs[0] === 'init') {
   console.log('    scan-prompt <text>   Scan prompt for injection attacks');
   console.log('    scan-security <file> Scan file for vulnerabilities');
   console.log('    scan-skill <path>    Scan OpenClaw skill for security threats [--baseline]');
+  console.log('    scan-clawhub         Batch scan all ClawHub skills and generate report');
   console.log('    check-package <n> <e> Check if package exists in ecosystem');
   console.log('    scan-packages <f> <e> Scan file imports for hallucinated packages');
   console.log('    scan-project <dir>   Scan directory for vulnerabilities with grading');

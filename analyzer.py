@@ -8,6 +8,10 @@ provides enhanced detection when dependencies are installed.
 """
 
 import sys
+import warnings
+
+# Suppress regex deprecation warnings for patterns with inline flags
+warnings.filterwarnings('ignore', category=DeprecationWarning)
 import json
 import os
 import re
