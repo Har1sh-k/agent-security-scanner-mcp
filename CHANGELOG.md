@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] - 2026-02-23
+
+### 🔒 Security Fixes (Critical)
+- **Command Injection Prevention** - Fixed command injection in VS Code extension via `cp.execFile()` (src/extension.ts:17) - prevents arbitrary code execution via malicious filenames - CVE-class vulnerability (PR #19, @Har1sh-k)
+- **Path Traversal Prevention** - Symlink rejection + double containment check prevents escaping allowed directories (src/tools/scan-skill.js:769-802) (PR #19, @Har1sh-k)
+
+### 🛡️ Security Hardening
+- **DoS Prevention** - 1 MB SKILL.md cap, 100 KB prompt cap, 5 MB supporting files cap
+- **Timeout Cancellation** - AbortController + process.kill() for hung scans (120s limit)
+- **Fail-Closed Design** - Crashed scanners emit findings instead of silent success
+- **Atomic Baseline Writes** - Temp + rename with mode 0o600, prevents race conditions
+- **Hash-Based Baselines** - `{slug}-{pathHash}.json` prevents collision attacks
+- **Frontmatter Stripping** - Remove YAML metadata before prompt scanning
+- **Comprehensive Rug Pull** - Hash includes all supporting files, not just SKILL.md
+
+### 🆕 New Features
+- **4 New Action Types** - `cron`, `process_spawn`, `git`, `docker` with 60+ detection rules (PR #19, @Har1sh-k)
+  - cron: Persistence (@reboot), high-frequency jobs, remote code exec
+  - process_spawn: Reverse shells, background daemons, privilege escalation
+  - git: Force push, hard reset, credential exposure, untrusted remotes
+  - docker: Privileged containers, host mounts, socket access, dangerous capabilities
+- **Recursive File Walking** - Scan supporting files up to 5 levels deep (max 50 files, 5 MB)
+- **Manifest Scanning** - Extract dependencies from package.json, requirements.txt, Cargo.toml, Gemfile
+- **Extended Code Blocks** - Tilde fences (`~~~`), Windows `\r\n`, powershell/ps1/bat/cmd/fish routing
+
+### 🪟 Cross-Platform
+- **Windows Python Resolution** - New src/python.js with `py -3` launcher support (PR #19, @Har1sh-k)
+- **Windows Path Handling** - Forward slashes in MCP config paths (PR #19, @Har1sh-k)
+
+### ⚡ Performance
+- **YAML Rule Caching** - Cache parsed rules, reduces prompt scan overhead by ~50ms
+- **Shared File Collection** - Collect once, use in L3 and L5, eliminates redundant walks
+- **Per-Layer Timing** - Full verbosity includes `timings_ms` breakdown
+
+### 🐛 Bug Fixes
+- **CI False-Assurance** - audit/harden stubs exit non-zero unless --allow-stub (PR #19, @Har1sh-k)
+- **MCP Server Version** - Read from package.json instead of hardcoded "1.0.0"
+- **Health Tool Rename** - clawproof_health → scanner_health (backward-compatible alias)
+- **Test Fixes** - Fixed 6 failures in init-codex and plugin-integration (PR #19, @Har1sh-k)
+
+### ⚠️ Breaking Changes (Internal)
+- **Baseline Filename Format** - Changed to `{slug}-{pathHash}.json` - users may see rug-pull warnings on first scan after upgrade (old baselines won't match new format)
+
+### 📦 Internal
+- **Improved Deduplication** - Dedupe key includes rule_id, source, file, line, matched_text
+- **OpenClaw Workspace** - Added ~/.openclaw/workspace/skills to allowed roots
+
+### 🙏 Contributors
+- @Har1sh-k - PR #19 (17 commits, +955 additions, -169 deletions) - security hardening, Windows compatibility, new action types
+
 ## [3.11.0] - 2026-02-23
 
 ### Added
