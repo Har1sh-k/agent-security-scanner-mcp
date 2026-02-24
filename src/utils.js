@@ -1,10 +1,11 @@
-import { execFileSync } from "child_process";
+import { execFileSync, execFile } from "child_process";
 import { createHash } from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { dirname, join, extname, basename } from "path";
 import { fileURLToPath } from "url";
 import { FIX_TEMPLATES } from './fix-patterns.js';
 import { getDaemonClient, shutdownDaemon } from './daemon-client.js';
+import { resolvePythonCommand, pythonArgs } from './python.js';
 export { isTestFile } from './context.js';
 
 // Handle both ESM and CJS bundling (Smithery bundles to CJS)
@@ -50,14 +51,16 @@ export function detectLanguage(filePath) {
 
 // Detect which analysis engine is available
 export function detectEngineMode() {
+  const pyCmd = resolvePythonCommand();
+  const pyArgs = pythonArgs();
   try {
-    execFileSync('python3', ['-c', 'import tree_sitter; print("ast")'], {
+    execFileSync(pyCmd, [...pyArgs, '-c', 'import tree_sitter; print("ast")'], {
       encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
     });
     return 'ast';
   } catch {
     try {
-      execFileSync('python3', ['--version'], {
+      execFileSync(pyCmd, [...pyArgs, '--version'], {
         encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
       });
       return 'regex';
@@ -80,11 +83,12 @@ export function getEngineMode() {
 export function runAnalyzer(filePath, engine = 'auto') {
   try {
     const analyzerPath = join(__dirname, '..', 'analyzer.py');
-    const args = [analyzerPath, filePath];
+    const pyCmd = resolvePythonCommand();
+    const args = [...pythonArgs(), analyzerPath, filePath];
     if (engine !== 'auto') {
       args.push('--engine', engine);
     }
-    const result = execFileSync('python3', args, {
+    const result = execFileSync(pyCmd, args, {
       encoding: 'utf-8',
       timeout: 45000  // Increased to 45s to match daemon timeout
     });
@@ -94,17 +98,71 @@ export function runAnalyzer(filePath, engine = 'auto') {
   }
 }
 
-// Async analyzer — tries daemon first, falls back to sync execFileSync
-export async function runAnalyzerAsync(filePath, engine = 'auto') {
+// Async analyzer — tries daemon first, falls back to async execFile.
+// Accepts an optional AbortSignal to truly cancel in-flight work (kills child process).
+export async function runAnalyzerAsync(filePath, engine = 'auto', signal) {
+  if (signal && signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
   try {
     const client = getDaemonClient();
     if (client.isAvailable) {
-      return await client.analyze(filePath, engine);
+      const analyzePromise = client.analyze(filePath, engine);
+      if (signal) {
+        return await Promise.race([
+          analyzePromise,
+          new Promise((_, reject) => {
+            signal.addEventListener('abort', () =>
+              reject(new DOMException('Analysis aborted', 'AbortError')),
+              { once: true }
+            );
+          }),
+        ]);
+      }
+      return await analyzePromise;
     }
-  } catch {
-    // Daemon failed — fall through to sync
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    // Daemon failed — fall through to async execFile
   }
-  return runAnalyzer(filePath, engine);
+  if (signal && signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
+
+  // Async fallback with true cancellation — kill child process on abort
+  return new Promise((resolve, reject) => {
+    const analyzerPath = join(__dirname, '..', 'analyzer.py');
+    const pyCmd = resolvePythonCommand();
+    const args = [...pythonArgs(), analyzerPath, filePath];
+    if (engine !== 'auto') args.push('--engine', engine);
+
+    const child = execFile(pyCmd, args, { encoding: 'utf-8', timeout: 45000 }, (error, stdout) => {
+      if (error) {
+        if (error.killed || error.signal) {
+          reject(new DOMException('Analysis aborted', 'AbortError'));
+        } else {
+          resolve({ error: error.message });
+        }
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        resolve({ error: 'Failed to parse analyzer output' });
+      }
+    });
+
+    if (signal) {
+      const onAbort = () => {
+        child.kill();
+        reject(new DOMException('Analysis aborted', 'AbortError'));
+      };
+      if (signal.aborted) {
+        child.kill();
+        reject(new DOMException('Analysis aborted', 'AbortError'));
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+      // Clean up listener when child completes normally
+      child.on('exit', () => signal.removeEventListener('abort', onAbort));
+    }
+  });
 }
 
 // Async cross-file analyzer — tries daemon first, falls back to sync
@@ -214,7 +272,8 @@ export function runCrossFileAnalyzer(filePaths) {
   try {
     const analyzerPath = join(__dirname, '..', 'cross_file_analyzer.py');
     if (!existsSync(analyzerPath)) return [];
-    const result = execFileSync('python3', [analyzerPath, ...filePaths], {
+    const pyCmd = resolvePythonCommand();
+    const result = execFileSync(pyCmd, [...pythonArgs(), analyzerPath, ...filePaths], {
       encoding: 'utf-8',
       timeout: 120000,
       maxBuffer: 10 * 1024 * 1024

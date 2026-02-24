@@ -3,7 +3,7 @@
 // supply chain verification, and rug pull detection.
 
 import { z } from "zod";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync, chmodSync } from "fs";
 import { resolve, basename, dirname, extname, join, sep } from "path";
 import { createHash } from "crypto";
 import { tmpdir, homedir } from "os";
@@ -54,8 +54,21 @@ const CODE_FILE_EXTENSIONS = new Set([
   '.java', '.php', '.c', '.cpp', '.rs', '.cs', '.h', '.hpp',
 ]);
 
+// Manifest / dependency files for supply-chain scanning
+const MANIFEST_FILES = new Set([
+  'package.json', 'package-lock.json',
+  'requirements.txt', 'setup.py', 'setup.cfg', 'pyproject.toml',
+  'gemfile', 'gemfile.lock',
+  'cargo.toml', 'cargo.lock',
+  'go.mod', 'go.sum',
+  'composer.json', 'composer.lock',
+]);
+
 const MAX_FILE_SIZE = 500 * 1024; // 500 KB
-const MAX_SUPPORTING_FILES = 20;
+const MAX_SKILL_MD_SIZE = 1024 * 1024; // 1 MB cap for SKILL.md
+const MAX_SUPPORTING_FILES = 50;
+const MAX_WALK_DEPTH = 5;
+const MAX_TOTAL_WALK_BYTES = 5 * 1024 * 1024; // 5 MB cumulative
 const SCAN_TIMEOUT_MS = 120_000; // 120s total scan timeout
 
 const PYTHON_BUILTINS = new Set([
@@ -106,6 +119,14 @@ const SOURCE_WEIGHTS = {
 };
 
 const SEVERITY_MULTIPLIER = { CRITICAL: 4, HIGH: 2, MEDIUM: 1 };
+
+// On Windows, paths are case-insensitive; normalize for containment checks.
+const IS_WIN = process.platform === 'win32';
+function normPath(p) { return IS_WIN ? p.toLowerCase() : p; }
+function pathStartsWith(child, parent) {
+  return normPath(child) === normPath(parent) || normPath(child).startsWith(normPath(parent) + sep);
+}
+const MAX_CLAWHAVOC_SCAN_LEN = 2 * 1024 * 1024; // 2 MB cap for regex matching
 
 // ---------------------------------------------------------------------------
 // Layer 4: ClawHavoc YAML loader (cached)
@@ -190,8 +211,46 @@ function loadClawHavocRules() {
 
 async function runPromptScan(content) {
   try {
-    const result = await scanAgentPrompt({ prompt_text: content, verbosity: 'full' });
+    // Strip YAML frontmatter (---\n...\n---) to reduce false positives from
+    // benign metadata keys.  However, we still scan the frontmatter VALUES
+    // separately so that malicious content hidden in metadata is not missed.
+    let textToScan = content;
+    let frontmatterValues = '';
+    if (textToScan.startsWith('---\n') || textToScan.startsWith('---\r\n')) {
+      const endMarker = textToScan.match(/\r?\n---\s*(?:\r?\n|$)/);
+      if (endMarker) {
+        const rawFrontmatter = textToScan.substring(0, endMarker.index + endMarker[0].length);
+        textToScan = textToScan.substring(endMarker.index + endMarker[0].length);
+        // Extract YAML values (everything after the colon on each line)
+        for (const line of rawFrontmatter.split('\n')) {
+          const colonIdx = line.indexOf(':');
+          if (colonIdx > 0) {
+            const val = line.substring(colonIdx + 1).trim().replace(/^["']|["']$/g, '');
+            if (val.length > 10) frontmatterValues += val + '\n';
+          }
+        }
+      }
+    }
+
+    // Scan body + frontmatter values together
+    const combinedText = frontmatterValues ? textToScan + '\n' + frontmatterValues : textToScan;
+    const result = await scanAgentPrompt({ prompt_text: combinedText, verbosity: 'full' });
     const parsed = JSON.parse(result.content[0].text);
+
+    // Handle oversized-input or error responses from the prompt scanner
+    if (parsed.error) {
+      return [{
+        category: 'prompt_scan_error',
+        severity: 'CRITICAL',
+        message: parsed.error,
+        matched_text: '',
+        file: 'SKILL.md',
+        source: 'prompt_scanner',
+        rule_id: 'prompt_scanner.oversized_or_error',
+        confidence: 'HIGH',
+      }];
+    }
+
     return (parsed.findings || []).map(f => ({
       category: f.category || 'prompt_injection',
       severity: f.severity === 'ERROR' ? 'CRITICAL' : f.severity === 'WARNING' ? 'HIGH' : 'MEDIUM',
@@ -204,7 +263,17 @@ async function runPromptScan(content) {
     }));
   } catch (error) {
     console.error("Layer 1 (prompt scan) failed:", error.message);
-    return [];
+    // Fail-closed: a crashed prompt scanner should not silently improve the grade
+    return [{
+      category: 'prompt_scan_error',
+      severity: 'HIGH',
+      message: `Prompt scanner failed: ${error.message}`,
+      matched_text: '',
+      file: 'SKILL.md',
+      source: 'prompt_scanner',
+      rule_id: 'prompt_scanner.layer_failure',
+      confidence: 'MEDIUM',
+    }];
   }
 }
 
@@ -214,24 +283,27 @@ async function runPromptScan(content) {
 
 function extractCodeBlocks(content) {
   const blocks = [];
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
+  // Match both backtick (```) and tilde (~~~) fenced code blocks.
+  // Uses backreference (\1) to ensure closing fence uses the same character as opening.
+  const codeBlockRegex = /(`{3,}|~{3,})(\w*)\r?\n([\s\S]*?)\1/g;
   let match;
   while ((match = codeBlockRegex.exec(content)) !== null) {
-    const lang = (match[1] || '').toLowerCase();
-    const code = match[2];
+    const lang = (match[2] || '').toLowerCase();
+    const code = match[3];
     if (code.length < 10) continue;
     blocks.push({ lang, code });
   }
   return blocks;
 }
 
-async function runCodeBlockScan(blocks) {
+async function runCodeBlockScan(blocks, signal) {
   const findings = [];
 
   for (const { lang, code } of blocks) {
+    if (signal && signal.aborted) break;
     try {
-      // Shell blocks -> scanAgentAction
-      if (['bash', 'sh', 'shell', 'zsh'].includes(lang)) {
+      // Shell-like blocks -> scanAgentAction
+      if (['bash', 'sh', 'shell', 'zsh', 'powershell', 'ps1', 'bat', 'cmd', 'fish'].includes(lang)) {
         const result = await scanAgentAction({
           action_type: 'bash',
           action_value: code,
@@ -262,7 +334,7 @@ async function runCodeBlockScan(blocks) {
 
       try {
         writeFileSync(tmpPath, code, 'utf-8');
-        const issues = await runAnalyzerAsync(tmpPath);
+        const issues = await runAnalyzerAsync(tmpPath, 'auto', signal);
         if (Array.isArray(issues)) {
           for (const issue of issues) {
             findings.push({
@@ -292,31 +364,77 @@ async function runCodeBlockScan(blocks) {
 // Layer 3: Supporting Files
 // ---------------------------------------------------------------------------
 
-async function runSupportingFilesScan(skillDir, skillFile) {
+/**
+ * Recursively collect scannable files under skillDir, respecting limits.
+ * Skips symlinks, hidden dirs, node_modules, and __pycache__.
+ */
+function collectSupportingFiles(dir, skillFile, depth, state) {
+  if (depth > MAX_WALK_DEPTH) return;
+  if (state.files.length >= MAX_SUPPORTING_FILES) return;
+  if (state.totalBytes >= MAX_TOTAL_WALK_BYTES) return;
+
+  let entries;
+  try { entries = readdirSync(dir); } catch { return; }
+
+  for (const entry of entries) {
+    if (state.files.length >= MAX_SUPPORTING_FILES) break;
+    if (state.totalBytes >= MAX_TOTAL_WALK_BYTES) break;
+
+    // Skip most hidden entries, node_modules, __pycache__.
+    // Allow security-sensitive hidden files (.env*, .npmrc) through.
+    if (entry === 'node_modules' || entry === '__pycache__') continue;
+    if (entry.startsWith('.') && !entry.startsWith('.env') && entry !== '.npmrc' && entry !== '.github') continue;
+
+    const filePath = join(dir, entry);
+    let lst;
+    try { lst = lstatSync(filePath); } catch { continue; }
+
+    // Reject symlinks
+    if (lst.isSymbolicLink()) continue;
+
+    if (lst.isDirectory()) {
+      collectSupportingFiles(filePath, skillFile, depth + 1, state);
+      continue;
+    }
+
+    if (!lst.isFile()) continue;
+    if (lst.size > MAX_FILE_SIZE) continue;
+
+    // Skip SKILL.md — already scanned by L1/L2
+    if (resolve(filePath) === resolve(skillFile)) continue;
+
+    const ext = extname(entry).toLowerCase();
+    const lowerEntry = entry.toLowerCase();
+    // Accept code files, manifest files, and security-sensitive dotfiles
+    const isSecurityDotfile = lowerEntry.startsWith('.env') || lowerEntry === '.npmrc';
+    if (!CODE_FILE_EXTENSIONS.has(ext) && !MANIFEST_FILES.has(lowerEntry) && !isSecurityDotfile) continue;
+
+    state.totalBytes += lst.size;
+    // Relative path from skillDir for the file field
+    const relPath = filePath.substring(state.rootLen).replace(/\\/g, '/').replace(/^\//, '');
+    state.files.push({ filePath, relPath, size: lst.size });
+  }
+}
+
+async function runSupportingFilesScan(skillDir, skillFile, preCollected, signal) {
   const findings = [];
 
   try {
-    const entries = readdirSync(skillDir);
-    let scannedCount = 0;
+    const fileList = preCollected || (() => {
+      const state = { files: [], totalBytes: 0, rootLen: skillDir.length };
+      collectSupportingFiles(skillDir, skillFile, 0, state);
+      return state.files;
+    })();
 
-    for (const entry of entries) {
-      if (scannedCount >= MAX_SUPPORTING_FILES) break;
-
-      const filePath = join(skillDir, entry);
-
+    for (const { filePath, relPath } of fileList) {
+      if (signal && signal.aborted) break;
       try {
-        const stat = statSync(filePath);
-        if (!stat.isFile()) continue;
-        if (stat.size > MAX_FILE_SIZE) continue;
+        const ext = extname(filePath).toLowerCase();
 
-        // Skip the SKILL.md itself — already scanned by L1/L2
-        if (resolve(filePath) === resolve(skillFile)) continue;
+        // Manifest / dependency files are handled by supply-chain layer — skip code analysis
+        if (MANIFEST_FILES.has(basename(filePath).toLowerCase())) continue;
 
-        const ext = extname(entry).toLowerCase();
-        if (!CODE_FILE_EXTENSIONS.has(ext)) continue;
-
-        const issues = await runAnalyzerAsync(filePath);
-        scannedCount++;
+        const issues = await runAnalyzerAsync(filePath, 'auto', signal);
         if (Array.isArray(issues)) {
           for (const issue of issues) {
             findings.push({
@@ -324,7 +442,8 @@ async function runSupportingFilesScan(skillDir, skillFile) {
               severity: issue.severity === 'error' ? 'HIGH' : issue.severity === 'warning' ? 'MEDIUM' : 'MEDIUM',
               message: issue.message,
               matched_text: (issue.line_content || '').substring(0, 200),
-              file: entry,
+              file: relPath,
+              line: issue.line ?? undefined,
               source: 'code_analysis',
               rule_id: issue.ruleId || '',
               confidence: 'HIGH',
@@ -332,7 +451,7 @@ async function runSupportingFilesScan(skillDir, skillFile) {
           }
         }
       } catch (error) {
-        console.error(`Layer 3 (supporting file) failed for ${entry}:`, error.message);
+        console.error(`Layer 3 (supporting file) failed for ${relPath}:`, error.message);
       }
     }
   } catch (error) {
@@ -353,7 +472,9 @@ function runClawHavocScan(content, codeBlocks) {
     const rules = loadClawHavocRules();
     // Concatenate all code block content for matching
     const allCode = codeBlocks.map(b => b.code).join('\n');
-    const scanText = content + '\n' + allCode;
+    // Cap total text to prevent ReDoS on pathological input
+    const raw = content + '\n' + allCode;
+    const scanText = raw.length > MAX_CLAWHAVOC_SCAN_LEN ? raw.substring(0, MAX_CLAWHAVOC_SCAN_LEN) : raw;
 
     for (const rule of rules) {
       let matched = false;
@@ -392,27 +513,94 @@ function runClawHavocScan(content, codeBlocks) {
 // Layer 5: Package Supply Chain
 // ---------------------------------------------------------------------------
 
-async function runSupplyChainScan(codeBlocks) {
+/**
+ * Extract packages from a manifest file and return {ecosystem, packages[]} pairs.
+ */
+function extractPackagesFromManifest(filePath, content) {
+  const fileName = basename(filePath).toLowerCase();
+  const packages = [];
+
+  try {
+    if (fileName === 'package.json') {
+      const pkg = JSON.parse(content);
+      for (const depKey of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+        if (pkg[depKey] && typeof pkg[depKey] === 'object') {
+          packages.push(...Object.keys(pkg[depKey]));
+        }
+      }
+      return { ecosystem: 'npm', packages };
+    }
+
+    if (fileName === 'requirements.txt') {
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('-')) continue;
+        const pkg = trimmed.split(/[><=!~\[\s;]/)[0].trim();
+        if (pkg) packages.push(pkg);
+      }
+      return { ecosystem: 'pypi', packages };
+    }
+
+    if (fileName === 'gemfile') {
+      const gemMatches = content.matchAll(/^\s*gem\s+['"]([^'"]+)['"]/gm);
+      for (const m of gemMatches) packages.push(m[1]);
+      return { ecosystem: 'rubygems', packages };
+    }
+
+    if (fileName === 'cargo.toml') {
+      // Section-aware: only extract keys under [dependencies], [dev-dependencies],
+      // [build-dependencies], or [*dependencies.*] (e.g. [target.'...'.dependencies])
+      let inDepSection = false;
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim();
+        // Detect section headers
+        const sectionMatch = trimmed.match(/^\[([^\]]+)\]/);
+        if (sectionMatch) {
+          const section = sectionMatch[1].toLowerCase();
+          inDepSection = /(?:^|\.)(?:dependencies|dev-dependencies|build-dependencies)$/.test(section);
+          continue;
+        }
+        if (!inDepSection) continue;
+        // Extract "name = ..." lines within dependency sections
+        const depMatch = trimmed.match(/^([a-zA-Z0-9_-]+)\s*=/);
+        if (depMatch) {
+          packages.push(depMatch[1]);
+        }
+      }
+      return { ecosystem: 'crates', packages };
+    }
+
+    // go.mod: Go ecosystem not yet supported by the hallucination bloom filter.
+    // Return a sentinel so callers can surface an informational finding.
+    if (fileName === 'go.mod') {
+      return { ecosystem: 'go', packages: [], unsupported: true };
+    }
+  } catch {
+    // Parse failed — return empty
+  }
+
+  return { ecosystem: null, packages: [] };
+}
+
+async function runSupplyChainScan(codeBlocks, skillDir, skillFile, preCollected, signal) {
   const findings = [];
   const checked = new Set();
 
   try {
+    // 1. Scan code blocks (existing behavior)
     for (const { lang, code } of codeBlocks) {
+      if (signal && signal.aborted) break;
       let packages = [];
       let ecosystem = null;
 
-      // JS/TS imports
       if (['javascript', 'js', 'typescript', 'ts'].includes(lang)) {
         ecosystem = 'npm';
-        // require('pkg')
         const requireMatches = code.matchAll(/require\s*\(\s*['"]([^'"]+)['"]\s*\)/g);
         for (const m of requireMatches) packages.push(m[1]);
-        // import ... from 'pkg'
         const importFromMatches = code.matchAll(/import\s+(?:[\s\S]*?\s+from\s+)?['"]([^'"]+)['"]/g);
         for (const m of importFromMatches) packages.push(m[1]);
       }
 
-      // Python imports
       if (['python', 'py'].includes(lang)) {
         ecosystem = 'pypi';
         const importMatches = code.matchAll(/^\s*import\s+(\S+)/gm);
@@ -424,27 +612,20 @@ async function runSupplyChainScan(codeBlocks) {
       if (!ecosystem || packages.length === 0) continue;
 
       for (let pkg of packages) {
-        // Skip relative imports
         if (pkg.startsWith('.') || pkg.startsWith('/')) continue;
 
-        // Normalize package names
         if (ecosystem === 'npm') {
-          // Scoped packages: @scope/name -> @scope/name
-          // Non-scoped: take first segment before /
           if (pkg.startsWith('@')) {
             const parts = pkg.split('/');
             pkg = parts.length >= 2 ? `${parts[0]}/${parts[1]}` : pkg;
           } else {
             pkg = pkg.split('/')[0];
           }
-          // Skip Node builtins
           if (NODE_BUILTINS.has(pkg)) continue;
         }
 
         if (ecosystem === 'pypi') {
-          // Take the top-level module name
           pkg = pkg.split('.')[0];
-          // Skip Python builtins
           if (PYTHON_BUILTINS.has(pkg)) continue;
         }
 
@@ -471,6 +652,73 @@ async function runSupplyChainScan(codeBlocks) {
         }
       }
     }
+
+    // 2. Scan manifest / dependency files in skill directory
+    const fileList = preCollected || (() => {
+      const state = { files: [], totalBytes: 0, rootLen: skillDir.length };
+      collectSupportingFiles(skillDir, skillFile, 0, state);
+      return state.files;
+    })();
+    for (const { filePath } of fileList) {
+      if (signal && signal.aborted) break;
+      const fname = basename(filePath).toLowerCase();
+      if (!MANIFEST_FILES.has(fname)) continue;
+
+      try {
+        const content = readFileSync(filePath, 'utf-8');
+        const manifest = extractPackagesFromManifest(filePath, content);
+        const { ecosystem, packages } = manifest;
+        if (!ecosystem) continue;
+
+        // Surface unsupported ecosystems as informational finding
+        if (manifest.unsupported) {
+          const relPath = filePath.substring(skillDir.length).replace(/\\/g, '/').replace(/^\//, '');
+          findings.push({
+            category: 'unsupported_ecosystem',
+            severity: 'MEDIUM',
+            message: `${fname} found but "${ecosystem}" ecosystem is not yet supported for supply-chain verification`,
+            matched_text: fname,
+            file: relPath,
+            source: 'supply_chain',
+            rule_id: `supply_chain.unsupported.${ecosystem}`,
+            confidence: 'HIGH',
+          });
+          continue;
+        }
+
+        if (packages.length === 0) continue;
+
+        for (let pkg of packages) {
+          if (ecosystem === 'npm' && NODE_BUILTINS.has(pkg)) continue;
+          if (ecosystem === 'pypi' && PYTHON_BUILTINS.has(pkg)) continue;
+
+          const key = `${ecosystem}:${pkg}`;
+          if (checked.has(key)) continue;
+          checked.add(key);
+
+          try {
+            const result = isHallucinated(pkg, ecosystem);
+            if (result.hallucinated) {
+              const relPath = filePath.substring(skillDir.length).replace(/\\/g, '/').replace(/^\//, '');
+              findings.push({
+                category: 'hallucinated_package',
+                severity: 'CRITICAL',
+                message: `Package "${pkg}" not found in ${ecosystem} registry — possible hallucinated or malicious dependency`,
+                matched_text: pkg,
+                file: relPath,
+                source: 'supply_chain',
+                rule_id: `supply_chain.hallucinated.${ecosystem}`,
+                confidence: result.bloomFilter ? 'MEDIUM' : 'HIGH',
+              });
+            }
+          } catch (error) {
+            console.error(`Layer 5 (supply chain) manifest check failed for ${pkg}:`, error.message);
+          }
+        }
+      } catch {
+        // Skip unreadable manifests
+      }
+    }
   } catch (error) {
     console.error("Layer 5 (supply chain scan) failed:", error.message);
   }
@@ -487,33 +735,57 @@ function getBaselineDir() {
 }
 
 function getBaselinePath(skillDir) {
-  const name = basename(skillDir);
-  return join(getBaselineDir(), `${name}.json`);
+  // Use slug + hash of canonical path to avoid collisions between skills with
+  // the same folder name in different locations.
+  const slug = basename(skillDir).replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 64);
+  const pathHash = createHash('sha256').update(skillDir).digest('hex').substring(0, 12);
+  return join(getBaselineDir(), `${slug}-${pathHash}.json`);
 }
 
-function computeHash(content) {
-  return createHash('sha256').update(content).digest('hex');
-}
-
-function runRugPullCheck(content, skillDir, saveBaseline) {
+function runRugPullCheck(content, skillDir, saveBaseline, collectedFiles) {
   const findings = [];
-  const hash = computeHash(content);
+  // Hash SKILL.md + all supporting files with path boundaries and sorted
+  // order so the hash is canonical and structural changes are detected.
+  const hasher = createHash('sha256');
+  hasher.update('SKILL.md\0');
+  hasher.update(content);
+  if (collectedFiles) {
+    // Sort by relative path for deterministic ordering (readdirSync order is OS-dependent)
+    const sorted = [...collectedFiles].sort((a, b) => a.relPath.localeCompare(b.relPath));
+    for (const { filePath, relPath } of sorted) {
+      try {
+        hasher.update('\0' + relPath + '\0');
+        hasher.update(readFileSync(filePath));
+      } catch { /* skip unreadable */ }
+    }
+  }
+  const hash = hasher.digest('hex');
 
   try {
     const baselinePath = getBaselinePath(skillDir);
 
     if (saveBaseline) {
-      // Save baseline
+      // Save baseline with atomic write (temp + rename) and restrictive perms
       const baselineDir = getBaselineDir();
       if (!existsSync(baselineDir)) {
-        mkdirSync(baselineDir, { recursive: true });
+        mkdirSync(baselineDir, { recursive: true, mode: 0o700 });
       }
-      writeFileSync(baselinePath, JSON.stringify({
+      const data = JSON.stringify({
         hash,
         skill_path: skillDir,
         saved_at: new Date().toISOString(),
         content_length: content.length,
-      }, null, 2), 'utf-8');
+      }, null, 2);
+      const tmpFile = baselinePath + `.tmp.${process.pid}.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      writeFileSync(tmpFile, data, { encoding: 'utf-8', mode: 0o600 });
+      try {
+        renameSync(tmpFile, baselinePath);
+      } catch (renameErr) {
+        try { unlinkSync(tmpFile); } catch { /* best effort cleanup */ }
+        throw renameErr;
+      }
+      // On platforms where rename doesn't preserve mode, enforce it
+      try { chmodSync(baselinePath, 0o600); } catch { /* best effort */ }
     } else if (existsSync(baselinePath)) {
       // Compare against baseline
       try {
@@ -550,7 +822,10 @@ function deduplicateFindings(findings) {
   const unique = [];
 
   for (const f of findings) {
-    const key = `${f.rule_id || f.message}::${f.file}`;
+    // Include source, line, and normalized matched_text so that distinct
+    // findings on different lines are not collapsed.
+    const normText = (f.matched_text || '').trim().substring(0, 80).toLowerCase();
+    const key = `${f.rule_id || f.message}::${f.source || ''}::${f.file}::${f.line ?? ''}::${normText}`;
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(f);
@@ -606,15 +881,20 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
   // Path resolution
   const resolvedPath = resolve(skill_path);
 
-  // Path containment — only allow paths within cwd or ~/.openclaw/skills/
-  const cwd = process.cwd();
-  const openclawSkills = resolve(homedir(), '.openclaw', 'skills');
-  const isAllowed = resolvedPath === cwd || resolvedPath.startsWith(cwd + sep)
-    || resolvedPath === openclawSkills || resolvedPath.startsWith(openclawSkills + sep);
+  // Path containment — check on resolved path FIRST (before existence)
+  // so that invalid external paths get rejected with the right error message.
+  // Use raw cwd here (resolvedPath is also non-canonical at this point).
+  const rawCwd = process.cwd();
+  const allowedSkillRoots = [
+    resolve(homedir(), '.openclaw', 'skills'),
+    resolve(homedir(), '.openclaw', 'workspace', 'skills'),
+  ];
+  const isAllowed = pathStartsWith(resolvedPath, rawCwd)
+    || allowedSkillRoots.some(root => pathStartsWith(resolvedPath, root));
   if (!isAllowed) {
     return {
       content: [{ type: "text", text: JSON.stringify({
-        error: "skill_path must be within the current working directory or ~/.openclaw/skills/",
+        error: "skill_path must be within the current working directory or ~/.openclaw/skills/ (or ~/.openclaw/workspace/skills/)",
         skill_path: resolvedPath
       }) }]
     };
@@ -626,20 +906,63 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     };
   }
 
-  const stat = statSync(resolvedPath);
+  // Reject symlinks at the top level to prevent symlink-based path escapes
+  const topStat = lstatSync(resolvedPath);
+  if (topStat.isSymbolicLink()) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        error: "Symbolic links are not allowed as skill_path — resolve the real path first",
+        skill_path: resolvedPath
+      }) }]
+    };
+  }
+
+  // Resolve to real path and re-verify containment (defeats symlink escapes)
+  // Use canonical cwd here since realPath is also canonical.
+  const realPath = realpathSync(resolvedPath);
+  let canonCwd;
+  try { canonCwd = realpathSync(rawCwd); } catch { canonCwd = rawCwd; }
+  const canonRoots = allowedSkillRoots.map(root => {
+    try { return realpathSync(root); } catch { return root; }
+  });
+  const realAllowed = pathStartsWith(realPath, canonCwd)
+    || canonRoots.some(root => pathStartsWith(realPath, root));
+  if (!realAllowed) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        error: "skill_path must be within the current working directory or ~/.openclaw/skills/ (or ~/.openclaw/workspace/skills/)",
+        skill_path: realPath
+      }) }]
+    };
+  }
+
+  const stat = statSync(realPath);
   let skillDir, skillFile;
 
   if (stat.isDirectory()) {
-    skillDir = resolvedPath;
-    skillFile = resolve(resolvedPath, 'SKILL.md');
+    skillDir = realPath;
+    skillFile = resolve(realPath, 'SKILL.md');
   } else {
-    skillDir = dirname(resolvedPath);
-    skillFile = resolvedPath;
+    skillDir = dirname(realPath);
+    skillFile = realPath;
   }
 
   if (!existsSync(skillFile)) {
     return {
       content: [{ type: "text", text: JSON.stringify({ error: "SKILL.md not found", checked: skillFile }) }]
+    };
+  }
+
+  // Enforce size cap before reading to prevent OOM on adversarial inputs
+  const skillStat = statSync(skillFile);
+  if (skillStat.size > MAX_SKILL_MD_SIZE) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        error: `SKILL.md exceeds size limit (${(skillStat.size / 1024 / 1024).toFixed(1)} MB > 1 MB)`,
+        skill_path: realPath,
+        grade: 'F',
+        recommendation: 'SKILL.md is abnormally large — possible resource exhaustion attack',
+      }, null, 2) }]
     };
   }
 
@@ -651,25 +974,59 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
   // L1, L2, L3, L5 run in parallel. L4 and L6 are synchronous — run after.
   // ---------------------------------------------------------------------------
 
+  // Collect supporting files once and share between L3 and L5
+  const supportingState = { files: [], totalBytes: 0, rootLen: skillDir.length };
+  collectSupportingFiles(skillDir, skillFile, 0, supportingState);
+  const collectedFiles = supportingState.files;
+
+  // AbortController allows layers to check signal.aborted between iterations
+  // so they stop starting new work after the timeout fires.
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
   const scanPromise = (async () => {
+    const timings = {};
+    const wallStart = Date.now();
+
+    // Timed wrapper
+    async function timed(label, fn) {
+      const start = Date.now();
+      const result = await fn();
+      timings[label] = Date.now() - start;
+      return result;
+    }
+    function timedSync(label, fn) {
+      const start = Date.now();
+      const result = fn();
+      timings[label] = Date.now() - start;
+      return result;
+    }
+
     const [promptFindings, codeBlockFindings, supportingFindings, supplyChainFindings] =
       await Promise.all([
-        runPromptScan(content),                          // L1
-        runCodeBlockScan(codeBlocks),                    // L2
-        runSupportingFilesScan(skillDir, skillFile),     // L3
-        runSupplyChainScan(codeBlocks),                  // L5
+        timed('prompt_scan', () => runPromptScan(content)),                                                  // L1
+        timed('code_blocks', () => runCodeBlockScan(codeBlocks, signal)),                                    // L2
+        timed('supporting_files', () => runSupportingFilesScan(skillDir, skillFile, collectedFiles, signal)), // L3
+        timed('supply_chain', () => runSupplyChainScan(codeBlocks, skillDir, skillFile, collectedFiles, signal)), // L5
       ]);
 
-    const clawHavocFindings = runClawHavocScan(content, codeBlocks);           // L4 (sync)
-    const { findings: rugPullFindings, hash: contentHash } =
-      runRugPullCheck(content, skillDir, !!baseline);                           // L6 (sync)
+    if (signal.aborted) throw new Error('Scan timed out after 120s');
 
-    return { promptFindings, codeBlockFindings, supportingFindings, clawHavocFindings, supplyChainFindings, rugPullFindings, contentHash };
+    const clawHavocFindings = timedSync('clawhavoc', () => runClawHavocScan(content, codeBlocks));  // L4
+    const { findings: rugPullFindings, hash: contentHash } =
+      timedSync('rug_pull', () => runRugPullCheck(content, skillDir, !!baseline, collectedFiles));    // L6
+
+    timings.total = Date.now() - wallStart;
+
+    return { promptFindings, codeBlockFindings, supportingFindings, clawHavocFindings, supplyChainFindings, rugPullFindings, contentHash, timings };
   })();
 
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error('Scan timed out after 120s')), SCAN_TIMEOUT_MS);
+    timeoutId = setTimeout(() => {
+      abortController.abort();
+      reject(new Error('Scan timed out after 120s'));
+    }, SCAN_TIMEOUT_MS);
   });
 
   let layerResults;
@@ -680,7 +1037,7 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     return {
       content: [{ type: "text", text: JSON.stringify({
         error: error.message,
-        skill_path: resolvedPath,
+        skill_path: realPath,
         grade: 'F',
         recommendation: 'Scan failed — could not complete analysis within time limit',
       }, null, 2) }]
@@ -688,7 +1045,7 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
   }
   clearTimeout(timeoutId);
 
-  const { promptFindings, codeBlockFindings, supportingFindings, clawHavocFindings, supplyChainFindings, rugPullFindings, contentHash } = layerResults;
+  const { promptFindings, codeBlockFindings, supportingFindings, clawHavocFindings, supplyChainFindings, rugPullFindings, contentHash, timings } = layerResults;
 
   // ---------------------------------------------------------------------------
   // Merge, deduplicate, grade
@@ -722,7 +1079,7 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
   const level = verbosity || 'compact';
 
   const result = {
-    skill_path: resolvedPath,
+    skill_path: realPath,
     grade,
     findings_count: allFindings.length,
     recommendation,
@@ -731,11 +1088,12 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
   if (level === 'full') {
     result.content_hash = contentHash;
     result.layers_executed = layersExecuted;
+    result.timings_ms = timings;
     result.findings = allFindings;
   } else if (level === 'compact') {
     result.findings = allFindings;
   }
-  // 'minimal' — omit findings array and layers_executed
+  // 'minimal' — omit findings array, layers_executed, and timings
 
   return {
     content: [{ type: "text", text: JSON.stringify(result, null, 2) }]

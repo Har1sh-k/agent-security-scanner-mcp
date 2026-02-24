@@ -35,11 +35,18 @@ try {
   __dirname = process.cwd();
 }
 
+// Read version from package.json
+let _pkgVersion = '0.0.0';
+try {
+  const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
+  _pkgVersion = pkg.version || '0.0.0';
+} catch { /* fallback */ }
+
 // Create MCP Server
 const server = new McpServer(
   {
-    name: "security-scanner",
-    version: "1.0.0",
+    name: "agent-security-scanner-mcp",
+    version: _pkgVersion,
   },
   {
     capabilities: {
@@ -163,7 +170,7 @@ server.tool(
 // Register scan_agent_action tool
 server.tool(
   "scan_agent_action",
-  "Pre-execution security check for agent actions (bash, file_write, file_read, http_request, file_delete). Returns ALLOW/WARN/BLOCK. Lighter than scan_agent_prompt — evaluates concrete actions.",
+  "Pre-execution security check for agent actions (bash, file_write, file_read, http_request, file_delete, cron, process_spawn, git, docker). Returns ALLOW/WARN/BLOCK.",
   scanAgentActionSchema,
   scanAgentAction
 );
@@ -202,17 +209,27 @@ server.tool(
 // PLUGIN HEALTH CHECK
 // ===========================================
 
+const _healthHandler = async () => {
+  const { getHealthStatus } = await import('./src/plugin-health.js');
+  const health = await getHealthStatus();
+  return {
+    content: [{ type: "text", text: JSON.stringify(health, null, 2) }]
+  };
+};
+
 server.tool(
-  "clawproof_health",
+  "scanner_health",
   "Check plugin health: engine status, daemon status, package data availability",
   {},
-  async () => {
-    const { getHealthStatus } = await import('./src/plugin-health.js');
-    const health = await getHealthStatus();
-    return {
-      content: [{ type: "text", text: JSON.stringify(health, null, 2) }]
-    };
-  }
+  _healthHandler
+);
+
+// Backward-compatible alias (will be removed in a future major version)
+server.tool(
+  "clawproof_health",
+  "Alias for scanner_health (deprecated, use scanner_health instead)",
+  {},
+  _healthHandler
 );
 
 // ===========================================
@@ -373,8 +390,9 @@ if (cliArgs[0] === 'init') {
   });
 } else if (cliArgs[0] === 'benchmark') {
   // CLI mode: benchmark [--save] [--json-only] [--compare-latest] [--corpus <path>]
+  const { resolvePythonCommand, pythonArgs } = await import('./src/python.js');
   const benchmarkPath = join(__dirname, 'benchmarks', 'benchmark_runner.py');
-  const benchArgs = [benchmarkPath];
+  const benchArgs = [...pythonArgs(), benchmarkPath];
 
   // Pass through supported flags
   for (let i = 1; i < cliArgs.length; i++) {
@@ -387,7 +405,7 @@ if (cliArgs[0] === 'init') {
   }
 
   try {
-    execFileSync('python3', benchArgs, { stdio: 'inherit', timeout: 300000 });
+    execFileSync(resolvePythonCommand(), benchArgs, { stdio: 'inherit', timeout: 300000 });
   } catch (err) {
     if (err.status) process.exit(err.status);
     console.error(`Benchmark error: ${err.message}`);
@@ -418,7 +436,7 @@ if (cliArgs[0] === 'init') {
   const actionValue = cliArgs[2];
   if (!actionType || !actionValue) {
     console.error('Usage: agent-security-scanner-mcp scan-action <type> <value> [--verbosity minimal|compact|full]');
-    console.error('Types: bash, file_write, file_read, http_request, file_delete');
+    console.error('Types: bash, file_write, file_read, http_request, file_delete, cron, process_spawn, git, docker');
     process.exit(1);
   }
   const verbosityIdx = cliArgs.indexOf('--verbosity');
