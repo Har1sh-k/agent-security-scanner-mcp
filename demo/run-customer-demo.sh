@@ -316,7 +316,11 @@ pause
 section "5a of 5  •  Performance  —  4 000× Daemon Cache"
 
 echo -e "  ${WHITE}Every AI coding agent triggers a scan on every keystroke.${NC}"
-echo -e "  A 4-second cold scan is unusable in an IDE. Watch this:${NC}"
+echo -e "  A 4-second cold scan is unusable in an IDE.${NC}"
+echo ""
+echo -e "  ${DIM}Note: This demo runs standalone Python (no daemon).${NC}"
+echo -e "  ${DIM}When using the MCP server in Claude Code/Cursor/etc.,${NC}"
+echo -e "  ${DIM}daemon caching gives 4000× faster results (8s → 2ms).${NC}"
 echo ""
 
 # Warm scan (same file, same mtime — should hit cache)

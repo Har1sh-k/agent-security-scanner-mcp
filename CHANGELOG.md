@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.0] - 2026-02-24
+
+### 🔒 Security
+
+- **Update ajv from 8.17.1 to 8.18.0** - Fixes CVE-2025-69873 (ReDoS attacks mitigation) via configured RegExp engine with `$data` keyword (PRs #11, #14)
+- **Update @modelcontextprotocol/sdk from 1.25.3 to 1.26.0** - Fixes GHSA-345p-7cg4-v4c7 (cross-client response data leak when sharing server/transport instances) (PRs #4, #9)
+
+### ⚡ Performance
+
+- **Update hono from 4.11.7 to 4.12.1** - Major router performance improvement (1.5x-2.0x faster) via trie-router optimization (PRs #17, #18)
+- **AJV tree-shaking support** - `"sideEffects": false` in package.json enables smaller bundle sizes
+- **Hono context optimization** - Fast path for `c.json()` matching `c.text()` optimization
+
+### 📦 Dependencies
+
+- **Update qs from 6.14.1 to 6.15.0** - Adds `strictMerge` option to wrap object/primitive conflicts in arrays, fixes `duplicates` option for bracket notation keys (PRs #10, #13)
+- **MCP SDK improvements** - OAuth client credentials providers scopes support, npm audit vulnerabilities resolved
+
+### 🛠️ Changed
+
+- **Hono new features**: `$path()` method for client (returns path string instead of full URL), `ApplyGlobalResponse` type helper for RPC client
+- **AJV bug fixes**: Infinity and NaN now serialize to null correctly
+- **QS improvements**: `strictMerge` option, bracket notation handling
+
+### 🐛 Fixed
+
+- All dependency security vulnerabilities addressed
+- Router performance bottlenecks resolved
+- Type export issues in Hono client fixed
+
+---
+
 ## [3.12.0] - 2026-02-23
 
 ### 🔒 Security Fixes (Critical)

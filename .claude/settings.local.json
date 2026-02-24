@@ -7,7 +7,9 @@
       "Bash(du:*)",
       "Bash(tar czf:*)",
       "Bash(git count-objects:*)",
-      "Bash(gh run list:*)"
+      "Bash(gh run list:*)",
+      "Bash(clawhub inspect:*)",
+      "Bash(gh pr view:*)"
     ]
   }
 }
