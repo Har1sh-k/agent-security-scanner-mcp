@@ -21,6 +21,17 @@ const MANIFEST_INJECTION_PHRASES = /ignore\s+previous|exfiltrat|override\s+.*ins
 const MANIFEST_ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060]/;
 const MANIFEST_BIDI = /[\u202A-\u202E\u2066-\u2069\u200E\u200F\u061C]/;
 
+// Suspicious default values in inputSchema (shell commands, URLs, injection phrases)
+const SUSPICIOUS_DEFAULT = /\b(curl|wget|nc|bash|sh|powershell|cmd)\b.*[|>]|https?:\/\/[^\s'"]+|ignore\s+previous|exfiltrat|override\s+.*instruction|do\s+not\s+tell|hidden\s+instruction|bypass\s+.*filter/i;
+
+// URL patterns for tool description scanning
+const URL_IN_DESCRIPTION = /https?:\/\/[^\s'"<>]+/gi;
+const SAFE_URL_DOMAINS = /^https?:\/\/(github\.com|npmjs\.com|pypi\.org|docs\.|api\.)/i;
+const TUNNELING_URL = /https?:\/\/[^\s'"]*\b(ngrok|serveo|localtunnel|localhost|127\.0\.0\.1|webhook\.site|requestbin|pipedream|interact\.sh|burp|oast)\b/i;
+
+// Cross-tool priority/exclusivity patterns
+const PRIORITY_PATTERNS = /\b(before\s+calling\s+any\s+other\s+tool|do\s+not\s+use\s+any\s+other\s+tool|replaces?\s+the\s+function\s+of|must\s+be\s+(called|used|run|invoked)\s+(first|before)|always\s+(call|use|run|invoke)\s+this\s+(first|before)|instead\s+of\s+(using|calling))\b/i;
+
 // Directories to skip when walking
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '__pycache__',
@@ -567,6 +578,14 @@ function generateRecommendations(findings) {
     recommendations.push('Tool schema changed since baseline. Run with update_baseline:true only after manually verifying all changes. Rug pull attacks modify tool behavior after initial user approval (Adversa TOP25 #6).');
   }
 
+  if (categories.has('schema-manipulation')) {
+    recommendations.push('Inspect all inputSchema property descriptions, defaults, and enum values for hidden instructions. Attackers embed injection in schema metadata that reaches the LLM but is invisible to users.');
+  }
+
+  if (categories.has('cross-tool-manipulation')) {
+    recommendations.push('Tool descriptions must not direct the LLM to invoke other tools or claim execution priority. This is a cross-tool manipulation attack that can chain tool calls without user consent.');
+  }
+
   if (recommendations.length === 0) {
     recommendations.push('No critical issues found. Continue following security best practices.');
   }
@@ -745,6 +764,139 @@ function checkRugPull(manifestPath, serverDir) {
 }
 
 // ============================================================
+// Schema-level inspection (Task 1)
+// ============================================================
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function checkSchemaManipulation(tool, manifestPath) {
+  const findings = [];
+  const name = tool.name || '';
+  const schema = tool.inputSchema;
+  if (!schema || typeof schema !== 'object') return findings;
+
+  const properties = schema.properties || {};
+
+  // Flag additionalProperties: true with no defined properties
+  if (schema.additionalProperties === true && Object.keys(properties).length === 0) {
+    findings.push({
+      rule: 'mcp.schema-open-additionalProperties',
+      severity: 'WARNING',
+      category: 'schema-manipulation',
+      message: `Tool "${name}" has additionalProperties:true with no defined properties — accepts arbitrary hidden parameters.`,
+      file: manifestPath,
+      line: 1,
+      match: name
+    });
+  }
+
+  // Walk each property
+  for (const [propName, propDef] of Object.entries(properties)) {
+    if (!propDef || typeof propDef !== 'object') continue;
+
+    const desc = propDef.description || '';
+    const defaultVal = propDef.default !== undefined ? String(propDef.default) : '';
+    const enumValues = Array.isArray(propDef.enum) ? propDef.enum.map(String) : [];
+
+    // Check description for injection phrases or hidden chars
+    if (desc && (MANIFEST_INJECTION_PHRASES.test(desc) || MANIFEST_ZERO_WIDTH.test(desc) || MANIFEST_BIDI.test(desc))) {
+      findings.push({
+        rule: 'mcp.schema-description-injection',
+        severity: 'ERROR',
+        category: 'schema-manipulation',
+        message: `Tool "${name}" property "${propName}" description contains injection language or hidden characters.`,
+        file: manifestPath,
+        line: 1,
+        match: desc.substring(0, 100)
+      });
+    }
+
+    // Check default for suspicious content
+    if (defaultVal && SUSPICIOUS_DEFAULT.test(defaultVal)) {
+      findings.push({
+        rule: 'mcp.schema-suspicious-default',
+        severity: 'ERROR',
+        category: 'schema-manipulation',
+        message: `Tool "${name}" property "${propName}" has a suspicious default value containing shell commands, URLs, or injection patterns.`,
+        file: manifestPath,
+        line: 1,
+        match: defaultVal.substring(0, 100)
+      });
+    }
+
+    // Check enum values for injection/suspicious content
+    for (const val of enumValues) {
+      if (MANIFEST_INJECTION_PHRASES.test(val) || SUSPICIOUS_DEFAULT.test(val)) {
+        findings.push({
+          rule: 'mcp.schema-suspicious-default',
+          severity: 'ERROR',
+          category: 'schema-manipulation',
+          message: `Tool "${name}" property "${propName}" has a suspicious enum value.`,
+          file: manifestPath,
+          line: 1,
+          match: val.substring(0, 100)
+        });
+        break;
+      }
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
+// Cross-tool manipulation detection (Task 2)
+// ============================================================
+
+function checkCrossToolManipulation(tools, manifestPath) {
+  const findings = [];
+  const toolNames = new Set(tools.map(t => (t.name || '').toLowerCase()).filter(Boolean));
+
+  for (const tool of tools) {
+    const name = tool.name || '';
+    const description = tool.description || '';
+    if (!description) continue;
+
+    // Check for cross-tool reference with action directives
+    for (const otherName of toolNames) {
+      if (otherName === name.toLowerCase()) continue;
+      const escaped = escapeRegex(otherName);
+      const refPattern1 = new RegExp(`\\b(before\\s+using|always\\s+(call|use|run|invoke)|after\\s+calling|instead\\s+of)\\s+\\w*${escaped}\\b`, 'i');
+      const refPattern2 = new RegExp(`\\b(call|use|invoke|run|execute|trigger)\\s+\\w*${escaped}\\b.*\\b(first|before|always)\\b`, 'i');
+      if (refPattern1.test(description) || refPattern2.test(description)) {
+        findings.push({
+          rule: 'mcp.cross-tool-reference',
+          severity: 'ERROR',
+          category: 'cross-tool-manipulation',
+          message: `Tool "${name}" description contains action directive referencing tool "${otherName}". This may be a cross-tool manipulation attack.`,
+          file: manifestPath,
+          line: 1,
+          match: description.substring(0, 100)
+        });
+        break;
+      }
+    }
+
+    // Check for generic priority/exclusivity patterns
+    if (PRIORITY_PATTERNS.test(description)) {
+      findings.push({
+        rule: 'mcp.cross-tool-priority-override',
+        severity: 'ERROR',
+        category: 'cross-tool-manipulation',
+        message: `Tool "${name}" description demands execution priority or exclusivity over other tools.`,
+        file: manifestPath,
+        line: 1,
+        match: description.substring(0, 100)
+      });
+    }
+  }
+
+  return findings;
+}
+
+// ============================================================
 // Manifest scanning (server.json)
 // ============================================================
 
@@ -792,6 +944,40 @@ function scanManifest(manifestPath) {
     // Suspiciously long description
     if (description.length > 500) {
       findings.push({ rule: 'mcp.manifest-description-too-long', severity: 'WARNING', category: 'description-injection', message: `Tool "${name}" description is ${description.length} chars — unusually long descriptions often contain hidden instructions.`, file: manifestPath, line: 1, match: description.substring(0, 100) });
+    }
+
+    // Schema-level inspection (Task 1)
+    findings.push(...checkSchemaManipulation(tool, manifestPath));
+
+    // URL detection in descriptions (Task 4)
+    const urls = description.match(URL_IN_DESCRIPTION);
+    if (urls) {
+      for (const url of urls) {
+        if (TUNNELING_URL.test(url)) {
+          findings.push({ rule: 'mcp.description-tunneling-url', severity: 'ERROR', category: 'description-injection', message: `Tool "${name}" description contains a dev/tunneling URL. No legitimate production tool should reference tunneling services.`, file: manifestPath, line: 1, match: url.substring(0, 100) });
+        } else if (!SAFE_URL_DOMAINS.test(url)) {
+          findings.push({ rule: 'mcp.description-suspicious-url', severity: 'WARNING', category: 'description-injection', message: `Tool "${name}" description contains an external URL that the LLM might follow.`, file: manifestPath, line: 1, match: url.substring(0, 100) });
+        }
+      }
+    }
+  }
+
+  // Cross-tool manipulation detection (Task 2)
+  findings.push(...checkCrossToolManipulation(tools, manifestPath));
+
+  // Z-score anomaly detection for description length (Task 3)
+  if (tools.length >= 5) {
+    const lengths = tools.map(t => (t.description || '').length);
+    const mean = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+    const stddev = Math.sqrt(lengths.reduce((sum, l) => sum + (l - mean) ** 2, 0) / lengths.length);
+    if (stddev > 0) {
+      for (const tool of tools) {
+        const len = (tool.description || '').length;
+        const zScore = (len - mean) / stddev;
+        if (zScore > 2.5) {
+          findings.push({ rule: 'mcp.description-length-anomaly', severity: 'WARNING', category: 'description-injection', message: `Tool "${tool.name}" description length (${len} chars) is a statistical outlier (z-score: ${zScore.toFixed(1)}) compared to other tools. May hide injected instructions.`, file: manifestPath, line: 1, match: (tool.description || '').substring(0, 100) });
+        }
+      }
     }
   }
 
