@@ -252,7 +252,12 @@ class SemgrepRuleLoader:
             languages.append('generic')
 
         metadata = rule_data.get('metadata', {})
-        
+
+        # Preserve paths.include/exclude for file-level filtering
+        paths = rule_data.get('paths')
+        if paths and isinstance(paths, dict):
+            metadata['paths'] = paths
+
         # Convert Semgrep patterns to our AST patterns
         patterns = self._extract_patterns(rule_data)
         pattern_nots = self._extract_pattern_nots(rule_data)

@@ -12,6 +12,7 @@ import warnings
 
 # Suppress regex deprecation warnings for patterns with inline flags
 warnings.filterwarnings('ignore', category=DeprecationWarning)
+import fnmatch
 import json
 import os
 import re
@@ -70,12 +71,54 @@ def detect_language(file_path):
     return EXTENSION_MAP.get(ext, 'generic')
 
 
+def _matches_path_filter(file_path, rule):
+    """Check if file_path matches a rule's paths.include/exclude filter.
+
+    Returns True if the rule should be applied to this file.
+    Rules without paths metadata apply to all files.
+    """
+    paths = rule.metadata.get('paths') if hasattr(rule, 'metadata') else None
+    if not paths or not isinstance(paths, dict):
+        return True
+
+    basename = os.path.basename(file_path)
+
+    # If include patterns exist, file must match at least one
+    include = paths.get('include')
+    if include and isinstance(include, list):
+        if not any(fnmatch.fnmatch(basename, p) or fnmatch.fnmatch(file_path, p) for p in include):
+            return False
+
+    # If exclude patterns exist, file must NOT match any
+    exclude = paths.get('exclude')
+    if exclude and isinstance(exclude, list):
+        if any(fnmatch.fnmatch(basename, p) or fnmatch.fnmatch(file_path, p) for p in exclude):
+            return False
+
+    return True
+
+
 def analyze_file_regex(file_path):
     """Original regex-based analysis (fallback when tree-sitter unavailable)."""
     issues = []
     try:
         language = detect_language(file_path)
-        rules = get_rules_for_language(language)
+        all_rules = get_rules_for_language(language)
+        # Filter out rules whose paths.include/exclude don't match this file
+        rules = {}
+        basename = os.path.basename(file_path)
+        for rid, r in all_rules.items():
+            rule_paths = r.get('metadata', {}).get('paths')
+            if rule_paths and isinstance(rule_paths, dict):
+                include = rule_paths.get('include')
+                if include and isinstance(include, list):
+                    if not any(fnmatch.fnmatch(basename, p) or fnmatch.fnmatch(file_path, p) for p in include):
+                        continue
+                exclude = rule_paths.get('exclude')
+                if exclude and isinstance(exclude, list):
+                    if any(fnmatch.fnmatch(basename, p) or fnmatch.fnmatch(file_path, p) for p in exclude):
+                        continue
+            rules[rid] = r
         print(f"[REGEX] Language: {language}, rules loaded: {len(rules)}", file=sys.stderr)
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
@@ -170,6 +213,7 @@ def analyze_file_ast(file_path):
             if (parse_result.language in r.languages or 'generic' in r.languages)
             and r.metadata.get('category', 'unknown') in SECURITY_CATEGORIES
             and r.id not in NOISY_RULES
+            and _matches_path_filter(file_path, r)
         ]
 
         findings = engine.apply_rules(applicable_rules, ast)
