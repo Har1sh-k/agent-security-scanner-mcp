@@ -48,7 +48,7 @@
     "url": "git+https://github.com/sinewaveai/agent-security-scanner-mcp.git",
     "directory": "prooflayer-scanner"
   },
-  "homepage": "https://github.com/sinewaveai/agent-security-scanner-mcp/tree/main/prooflayer-scanner#readme",
+  "homepage": "https://www.proof-layer.com/",
   "bugs": {
     "url": "https://github.com/sinewaveai/agent-security-scanner-mcp/issues"
   },
