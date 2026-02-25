@@ -4,6 +4,9 @@
   "description": "Lightweight, zero-Python security scanner MCP server for AI coding agents. Fast install (~5s), 1700+ vulnerability rules with pure JavaScript regex engine, 4.3M+ package hallucination detection. For Claude Code, Cursor, Windsurf, Cline.",
   "main": "index.js",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "prooflayer-scanner": "index.js"
   },

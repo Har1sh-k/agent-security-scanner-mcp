@@ -1,12 +1,66 @@
+<div align="center">
+
+<img src="./prooflayer-scanner/logo.svg" alt="ProofLayer Logo" width="400"/>
+
 # agent-security-scanner-mcp
 
-Security scanner for AI coding agents and autonomous assistants. Scans code for vulnerabilities, detects hallucinated packages, and blocks prompt injection — via MCP (Claude Code, Cursor, Windsurf, Cline) or CLI (OpenClaw, CI/CD).
+**Security scanner for AI coding agents and autonomous assistants**
+
+Scans code for vulnerabilities, detects hallucinated packages, and blocks prompt injection — via MCP (Claude Code, Cursor, Windsurf, Cline) or CLI (OpenClaw, CI/CD).
 
 [![npm downloads](https://img.shields.io/npm/dt/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
 [![npm version](https://img.shields.io/npm/v/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Benchmark: 97.7% precision](https://img.shields.io/badge/precision-97.7%25-brightgreen.svg)](benchmarks/RESULTS.md)
 [![CI](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml)
+
+</div>
+
+---
+
+## 🎯 Two Versions Available
+
+### 🔥 ProofLayer (Lightweight) - **NEW!**
+**Ultra-fast, zero-Python security scanner** — 81.5KB package, 4-second install
+
+[![npm](https://img.shields.io/npm/v/@prooflayer/security-scanner.svg)](https://www.npmjs.com/package/@prooflayer/security-scanner)
+[![Install Size](https://img.shields.io/badge/size-81.5KB-brightgreen)](https://www.npmjs.com/package/@prooflayer/security-scanner)
+
+```bash
+npm install -g @prooflayer/security-scanner
+```
+
+- ⚡ **4-second install** (vs 45s traditional scanners)
+- 📦 **81.5KB package** (vs 50MB+ alternatives)
+- 🚀 **Instant scans** - pure regex, no Python/LLM
+- 🛡️ **400+ security rules** across 9 languages
+- 🎯 **7 MCP tools** for AI agents
+- ✅ **Zero dependencies** on Python
+- 💯 **MIT licensed** - free for commercial use
+
+[📖 ProofLayer Documentation →](./prooflayer-scanner/)
+
+---
+
+### 🔬 Full Version (Advanced)
+**Enterprise-grade scanner** with AST analysis, taint tracking, and cross-file analysis
+
+[![npm](https://img.shields.io/npm/v/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
+
+```bash
+npm install -g agent-security-scanner-mcp
+```
+
+- 🧬 **AST + Taint Analysis** - deep code understanding
+- 🔍 **1,700+ security rules** across 12 languages
+- 📊 **Cross-file tracking** - follow data flows
+- 🎯 **11 MCP tools** + CLI commands
+- 📦 **4.3M+ package verification** (bloom filters)
+- 🐍 **Python analyzer** for advanced features
+
+Continue reading below for full version documentation →
+
+---
 
 > **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 777 ClawHub skills and found 69.5% have security issues. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Reports](./clawhub-security-reports/).
 >
