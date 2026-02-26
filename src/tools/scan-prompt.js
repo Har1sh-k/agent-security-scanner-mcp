@@ -622,6 +622,55 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
               }
             }
           }
+
+          // 2.8b: Nested base64 detection (double encoding)
+          const innerB64Matches = decoded.match(base64Regex);
+          if (innerB64Matches) {
+            for (const innerB64 of innerB64Matches) {
+              try {
+                const innerDecoded = Buffer.from(innerB64, 'base64').toString('utf-8');
+                const innerPrintable = innerDecoded.split('').filter(c => c.charCodeAt(0) >= 32 && c.charCodeAt(0) <= 126).length;
+                if (innerPrintable / innerDecoded.length > 0.5) {
+                  findings.push({
+                    rule_id: 'nested-base64',
+                    category: 'obfuscation',
+                    severity: 'ERROR',
+                    message: 'Nested base64 encoding detected — double encoding is a strong indicator of intentional obfuscation.',
+                    matched_text: innerDecoded.substring(0, 100),
+                    confidence: 'HIGH',
+                    risk_score: '85',
+                    action: 'BLOCK'
+                  });
+                  // Re-scan doubly-decoded text
+                  for (const rule of allRules) {
+                    for (const pattern of rule.patterns) {
+                      try {
+                        const regex = new RegExp(pattern, 'i');
+                        const match = innerDecoded.match(regex);
+                        if (match) {
+                          findings.push({
+                            rule_id: rule.id + '.nested-base64-decoded',
+                            category: rule.metadata.category || 'unknown',
+                            severity: rule.severity,
+                            message: rule.message + ' (detected in nested base64-decoded content)',
+                            matched_text: match[0].substring(0, 100),
+                            confidence: 'HIGH',
+                            risk_score: rule.metadata.risk_score || '50',
+                            action: rule.metadata.action || 'BLOCK'
+                          });
+                          break;
+                        }
+                      } catch (e) {
+                        // Skip invalid regex
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                // Skip invalid inner base64
+              }
+            }
+          }
         }
       } catch (e) {
         // Skip invalid base64

@@ -1,0 +1,6 @@
+version: 1
+suppress:
+  # use-escapexml targets JSP Expression Language (${...}) but false-positives
+  # on JavaScript template literals. This repo has no JSP files.
+  # Fixed in analyzer.py (paths.include filter support) for future releases.
+  - rule: use-escapexml

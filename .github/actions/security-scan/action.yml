@@ -399,6 +399,7 @@ runs:
     # -----------------------------------------------------------------------
     - name: Post PR comment with scan summary
       if: github.event_name == 'pull_request' && steps.scan.outputs.issues_count != '0'
+      continue-on-error: true
       uses: actions/github-script@v7
       with:
         script: |
