@@ -5,6 +5,74 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.0] - 2026-02-26
+
+### 🔒 MCP Scanner Hardening (9 New Detection Rules)
+
+PR #20 adds comprehensive MCP manifest security scanning with schema-level inspection, cross-tool manipulation detection, and advanced obfuscation detection.
+
+#### 🆕 New Features
+
+- **Schema-level injection detection** - Scans `inputSchema` property descriptions, defaults, and enum values for injection phrases, shell commands, and hidden characters
+  - `mcp.schema-description-injection` (ERROR) - Detects injection language or hidden characters in property descriptions
+  - `mcp.schema-suspicious-default` (ERROR) - Flags suspicious default values containing shell commands, URLs, or injection patterns
+  - `mcp.schema-open-additionalProperties` (WARNING) - Flags `additionalProperties: true` with empty properties (accepts arbitrary hidden parameters)
+
+- **Cross-tool manipulation detection** - Prevents tools from hijacking LLM execution flow
+  - `mcp.cross-tool-reference` (ERROR) - Detects tool descriptions directing LLM to invoke other tools with action directives
+  - `mcp.cross-tool-priority-override` (ERROR) - Flags tools claiming execution priority or exclusivity
+
+- **Statistical anomaly detection** - Identifies outlier tool descriptions that may hide injected instructions
+  - `mcp.description-length-anomaly` (WARNING) - Uses z-score analysis (threshold >2.5) to flag unusually long descriptions in servers with 5+ tools
+
+- **Suspicious URL detection** - Prevents data exfiltration and callback channels
+  - `mcp.description-suspicious-url` (WARNING) - Flags external URLs in tool descriptions that LLM might follow
+  - `mcp.description-tunneling-url` (ERROR) - Detects dev/tunneling URLs (ngrok, serveo, localtunnel, webhook.site, etc.)
+
+- **Nested base64 detection** - Detects double-encoded injection attempts
+  - `nested-base64` (ERROR) - Detects double-encoded base64 in prompts and re-scans decoded content
+
+#### 🐛 Bug Fixes
+
+- **YAML rule paths filter support** - Respects `paths.include/exclude` filters in analyzer.py, semgrep_loader.py, and rules/__init__.py
+  - Fixes false positives from `use-escapexml` rule (JSP-only) matching JavaScript template literals
+  - Added `.scannerrc.yaml` to suppress `use-escapexml` in this repo (no JSP files)
+- **CI fork permission handling** - Added `continue-on-error: true` to PR comment step for fork pull requests
+
+#### 📊 Test Coverage
+
+- **17 new tests** across 2 test suites (100% pass rate)
+  - 14 new tests in `tests/scan-mcp.test.js` (schema, cross-tool, anomaly, URL detection)
+  - 3 new tests in `tests/scan-prompt.test.js` (nested base64 detection)
+- **No regressions** - All 510+ existing tests pass (5 pre-existing failures in unrelated files)
+- **CI passing** - All 9 GitHub Actions checks green
+
+#### 🎯 Attack Vectors Mitigated
+
+- **Schema poisoning** - Hidden instructions in JSON schema metadata
+- **Cross-tool chaining** - Unauthorized tool call sequences
+- **Statistical hiding** - Outlier-length descriptions to bury injection
+- **Data exfiltration** - Tunneling URLs and callback channels
+- **Double obfuscation** - Nested base64 encoding to evade detection
+
+#### 📝 Files Changed (9 files, +573/-3 lines)
+
+- `src/tools/scan-mcp.js` (+186) - 3 new functions, 8 new rules, 2 recommendation blocks
+- `src/tools/scan-prompt.js` (+49) - Nested base64 decode-and-rescan
+- `tests/scan-mcp.test.js` (+243) - 14 comprehensive test cases
+- `tests/scan-prompt.test.js` (+30) - 3 nested base64 tests
+- `analyzer.py` (+45) - Path filter implementation
+- `rules/__init__.py` (+7) - Preserve paths metadata
+- `semgrep_loader.py` (+6) - Preserve paths metadata
+- `.scannerrc.yaml` (+6) - Suppress use-escapexml false positives
+- `.github/actions/security-scan/action.yml` (+1) - Fork permission fix
+
+### 🙏 Contributors
+
+- @Har1sh-k - PR #20 (3 commits, scanner hardening, path filter fix, CI improvements)
+
+---
+
 ## [3.13.0] - 2026-02-24
 
 ### 🔒 Security
