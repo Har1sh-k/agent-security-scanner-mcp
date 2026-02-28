@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 📦 New Package: @prooflayer/scanner-lite v1.0.0
+
+PR #21 introduces **scanner-lite** - a lightweight, MIT-licensed MCP security scanner positioned as a direct alternative to AgentAudit-MCP.
+
+#### 🌟 Highlights
+
+- **OWASP Agentic Top 10 Complete Coverage** - All 418 YAML rules + 33 JS rules tagged with ASI-01 through ASI-10 metadata
+- **18 New Agent-Specific Rules** - Memory poisoning, inter-agent communication, cascading failures, trust exploitation, rogue agents
+- **Runtime MCP Inspector** - Live JSON-RPC tool definition scanning with A-F grading
+- **311 Passing Tests** - 8 test files with 100% pass rate
+- **GitHub Action Ready** - Composite action + reusable workflow example
+- **MIT Licensed** - ~95KB compressed, fully offline-capable, zero Python dependencies
+
+#### 🆕 Features
+
+**OWASP Agentic Security Initiative Coverage**:
+- **ASI-01** Goal Hijacking & Prompt Injection (~80 rules)
+- **ASI-02** Tool Misuse & Unsafe Execution (~60 rules)
+- **ASI-03** Identity & Privilege Escalation (~30 rules)
+- **ASI-04** Supply Chain & Dependency Risks (~15 rules)
+- **ASI-05** Arbitrary Code Execution (~50 rules)
+- **ASI-06** Memory Poisoning - 4 new rules (vector-store-injection, embedding-raw-input, rag-no-sanitization, persistent-memory-write)
+- **ASI-07** Inter-Agent Communication - 3 new rules (http-no-tls, unvalidated-agent-message, broadcast-no-auth)
+- **ASI-08** Cascading Failures - 4 new rules (missing-max-iterations, missing-timeout, recursive-agent-call, no-error-boundary)
+- **ASI-09** Trust Exploitation - 3 new rules (auto-approve, disabled-guardrails, trust-all-sources)
+- **ASI-10** Rogue Agents - 4 new rules (no-kill-switch, unrestricted-spawning, self-modification, unrestricted-tool-access)
+
+**Runtime MCP Inspector** (`src/inspector.js`):
+- Connects to live MCP servers via JSON-RPC over stdio
+- Scans tool definitions for poisoning, spoofing, unicode attacks
+- Levenshtein distance name spoofing detection
+- A-F security grading
+- Available as `inspect_mcp_server` MCP tool + `inspect` CLI command
+
+**8 MCP Tools**:
+1. `scan_security` - 418 YAML rules across 13 languages
+2. `scan_mcp_server` - MCP server audit
+3. `scan_agent_prompt` - Prompt injection detection
+4. `check_package` - Package hallucination detection
+5. `scan_packages` - Bulk import scanning
+6. `fix_security` - Auto-fix with 165 templates
+7. `deep_audit` - Optional LLM analysis (5 providers)
+8. `inspect_mcp_server` - **NEW** Runtime inspector
+
+**CLI Commands**: scan, inspect, audit, check-package, prompt, download-data
+
+**GitHub Action**: Composite action in `scanner-lite/action.yml` for CI/CD integration
+
+#### 🐛 Critical Bug Fixes
+
+- **Regex engine `(?i)` flag** - 216 patterns in `agent-attacks.security.yaml` were silently failing due to Python `(?i)` flag incompatibility with JavaScript regex. Fixed by stripping `(?i)` and using `i` flag.
+- **Terraform detection** - Added `tf`/`hcl` to language maps so `.tf` files now correctly load Terraform rules
+
+#### 📊 Test Coverage
+
+- **311 tests across 8 files** (100% pass rate)
+- **New**: `inspector.test.js` (27 tests)
+- **Expanded**: scanner.test.js (29→51), tool-poisoning.test.js (27→52), prompt-scanner.test.js (25→43), cli.test.js (18→33), fix-engine.test.js (11→29), llm-audit.test.js (25→47)
+
+#### 📦 Package Details
+
+- **Name**: `@prooflayer/scanner-lite`
+- **Version**: 1.0.0
+- **License**: MIT
+- **Size**: ~95KB compressed (vs 230KB for AgentAudit-MCP)
+- **Dependencies**: Only 2 runtime deps (`@modelcontextprotocol/sdk`, `zod`)
+- **Location**: `scanner-lite/` subdirectory
+- **Offline**: Fully offline-capable, zero Python dependencies
+
+#### 📝 Competitive Positioning
+
+| Feature | scanner-lite | AgentAudit-MCP |
+|---------|-------------|----------------|
+| License | **MIT** | AGPL-3.0 |
+| Rules | **418 YAML + 33 JS** | 12 regex |
+| OWASP Agentic Top 10 | **ASI-01 through ASI-10** | None |
+| Tests | **311 (100% pass)** | ~30 |
+| Offline | **Yes** | No |
+| Auto-fix | **165 templates** | None |
+| SARIF | **Yes** | No |
+| Size | **~95KB** | ~230KB |
+
+#### 🙏 Contributors
+
+- @Har1sh-k - PR #21 (2 commits, +19,415 additions, scanner-lite package, OWASP ASI coverage, MCP inspector, bug fixes)
+
+---
+
 ## [3.16.0] - 2026-02-26
 
 ### 🔒 MCP Scanner Hardening (9 New Detection Rules)
