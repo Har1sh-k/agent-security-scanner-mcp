@@ -877,7 +877,7 @@ function generateRecommendation(grade) {
 // Main Orchestrator
 // ---------------------------------------------------------------------------
 
-export async function scanSkill({ skill_path, verbosity, baseline }) {
+export async function scanSkill({ skill_path, verbosity, baseline, skip_code_analysis }) {
   // Path resolution
   const resolvedPath = resolve(skill_path);
 
@@ -1005,8 +1005,8 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     const [promptFindings, codeBlockFindings, supportingFindings, supplyChainFindings] =
       await Promise.all([
         timed('prompt_scan', () => runPromptScan(content)),                                                  // L1
-        timed('code_blocks', () => runCodeBlockScan(codeBlocks, signal)),                                    // L2
-        timed('supporting_files', () => runSupportingFilesScan(skillDir, skillFile, collectedFiles, signal)), // L3
+        timed('code_blocks', () => skip_code_analysis ? [] : runCodeBlockScan(codeBlocks, signal)),          // L2
+        timed('supporting_files', () => skip_code_analysis ? [] : runSupportingFilesScan(skillDir, skillFile, collectedFiles, signal)), // L3
         timed('supply_chain', () => runSupplyChainScan(codeBlocks, skillDir, skillFile, collectedFiles, signal)), // L5
       ]);
 
