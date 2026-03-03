@@ -8,10 +8,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { loadPackageLists } from '../src/tools/check-package.js';
+import { scanSkill as scanSkillTool } from '../src/tools/scan-skill.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -46,37 +44,8 @@ async function findAllSkillFiles() {
 
 async function scanSkill(skillPath) {
   try {
-    // Convert to relative path for CLI validation
-    const relativePath = path.relative(process.cwd(), skillPath);
-
-    const { stdout } = await execFileAsync('node', [
-      path.join(__dirname, 'index.js'),
-      'scan-skill',
-      relativePath,
-      '--verbosity',
-      'minimal'
-    ], {
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-      timeout: 30000 // 30s timeout per skill
-    });
-
-    // Parse JSON from stdout (skip bloom filter loading messages)
-    // The JSON is at the END of the output, after all bloom filter messages
-    const lines = stdout.trim().split('\n');
-
-    // Find the LAST line that starts with {
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim().startsWith('{')) {
-        try {
-          return JSON.parse(lines[i]);
-        } catch (e) {
-          // Try next line if this one fails
-          continue;
-        }
-      }
-    }
-
-    return { error: 'No JSON output found' };
+    const result = await scanSkillTool({ skill_path: skillPath, verbosity: 'minimal' });
+    return JSON.parse(result.content[0].text);
   } catch (error) {
     return {
       error: error.message,
@@ -277,6 +246,11 @@ See \`CLAWHUB-PROMPT-SECURITY-REPORT.json\` for complete scan results with all f
 
 async function main() {
   console.log('🔍 Starting ClawHub Prompt Security Analysis\n');
+
+  // Load bloom filters once (avoids reloading ~60MB per skill scan)
+  console.log('📦 Loading package bloom filters...');
+  loadPackageLists();
+  console.log('✅ Bloom filters loaded\n');
 
   // Find all SKILL.md files
   console.log('📁 Discovering skills...');
