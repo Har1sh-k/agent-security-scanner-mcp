@@ -581,3 +581,4 @@ const cliArgs = process.argv.slice(2);
     process.exit(1);
   });
 }
+})(); // Close async IIFE
