@@ -3,7 +3,7 @@
 // supply chain verification, and rug pull detection.
 
 import { z } from "zod";
-import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync, chmodSync } from "fs";
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, writeFileSync, mkdirSync, unlinkSync, renameSync, chmodSync, mkdtempSync, rmSync } from "fs";
 import { resolve, basename, dirname, extname, join, sep } from "path";
 import { createHash } from "crypto";
 import { tmpdir, homedir } from "os";
@@ -329,11 +329,20 @@ async function runCodeBlockScan(blocks, signal) {
       const ext = LANG_EXT_MAP[lang];
       if (!ext) continue;
 
-      const tmpName = `skill-scan-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const tmpPath = join(tmpdir(), tmpName);
+      // Security: Create unique temp directory to prevent race conditions and symlink attacks
+      let tmpDir;
+      try {
+        tmpDir = mkdtempSync(join(tmpdir(), 'skill-scan-'));
+      } catch (err) {
+        console.error(`Failed to create temp directory: ${err.message}`);
+        continue;
+      }
+
+      const tmpPath = join(tmpDir, `code.${ext}`);
 
       try {
-        writeFileSync(tmpPath, code, 'utf-8');
+        // Write with restrictive permissions (0600) to prevent other users from reading
+        writeFileSync(tmpPath, code, { encoding: 'utf-8', mode: 0o600 });
         const issues = await runAnalyzerAsync(tmpPath, 'auto', signal);
         if (Array.isArray(issues)) {
           for (const issue of issues) {
@@ -350,7 +359,12 @@ async function runCodeBlockScan(blocks, signal) {
           }
         }
       } finally {
-        try { unlinkSync(tmpPath); } catch { /* best effort cleanup */ }
+        // Clean up entire directory atomically
+        try {
+          rmSync(tmpDir, { recursive: true, force: true });
+        } catch (err) {
+          console.error(`Failed to clean up temp dir ${tmpDir}:`, err.message);
+        }
       }
     } catch (error) {
       console.error(`Layer 2 (code block scan) failed for ${lang}:`, error.message);
@@ -878,63 +892,51 @@ function generateRecommendation(grade) {
 // ---------------------------------------------------------------------------
 
 export async function scanSkill({ skill_path, verbosity, baseline }) {
-  // Path resolution
-  const resolvedPath = resolve(skill_path);
+  // Security: Resolve to canonical path FIRST to prevent TOCTOU and symlink attacks
+  const inputPath = skill_path;
+  let realPath;
 
-  // Path containment — check on resolved path FIRST (before existence)
-  // so that invalid external paths get rejected with the right error message.
-  // Use raw cwd here (resolvedPath is also non-canonical at this point).
-  const rawCwd = process.cwd();
+  try {
+    // Resolve to canonical path immediately (defeats symlink attacks)
+    realPath = realpathSync(resolve(inputPath));
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        error: "Invalid path, symlink loop, or permission denied",
+        skill_path: inputPath,
+        details: err.message
+      }) }]
+    };
+  }
+
+  // Verify containment on canonical path ONLY
+  // This prevents symlink escapes by checking the REAL resolved location
+  const canonCwd = realpathSync(process.cwd());
   const allowedSkillRoots = [
     resolve(homedir(), '.openclaw', 'skills'),
     resolve(homedir(), '.openclaw', 'workspace', 'skills'),
-  ];
-  const isAllowed = pathStartsWith(resolvedPath, rawCwd)
-    || allowedSkillRoots.some(root => pathStartsWith(resolvedPath, root));
+  ].map(root => {
+    try {
+      return existsSync(root) ? realpathSync(root) : null;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+
+  const isAllowed = pathStartsWith(realPath, canonCwd)
+    || allowedSkillRoots.some(root => pathStartsWith(realPath, root));
+
   if (!isAllowed) {
     return {
       content: [{ type: "text", text: JSON.stringify({
         error: "skill_path must be within the current working directory or ~/.openclaw/skills/ (or ~/.openclaw/workspace/skills/)",
-        skill_path: resolvedPath
+        skill_path: realPath,
+        attempted_path: inputPath
       }) }]
     };
   }
 
-  if (!existsSync(resolvedPath)) {
-    return {
-      content: [{ type: "text", text: JSON.stringify({ error: "Skill path not found", skill_path: resolvedPath }) }]
-    };
-  }
-
-  // Reject symlinks at the top level to prevent symlink-based path escapes
-  const topStat = lstatSync(resolvedPath);
-  if (topStat.isSymbolicLink()) {
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        error: "Symbolic links are not allowed as skill_path — resolve the real path first",
-        skill_path: resolvedPath
-      }) }]
-    };
-  }
-
-  // Resolve to real path and re-verify containment (defeats symlink escapes)
-  // Use canonical cwd here since realPath is also canonical.
-  const realPath = realpathSync(resolvedPath);
-  let canonCwd;
-  try { canonCwd = realpathSync(rawCwd); } catch { canonCwd = rawCwd; }
-  const canonRoots = allowedSkillRoots.map(root => {
-    try { return realpathSync(root); } catch { return root; }
-  });
-  const realAllowed = pathStartsWith(realPath, canonCwd)
-    || canonRoots.some(root => pathStartsWith(realPath, root));
-  if (!realAllowed) {
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        error: "skill_path must be within the current working directory or ~/.openclaw/skills/ (or ~/.openclaw/workspace/skills/)",
-        skill_path: realPath
-      }) }]
-    };
-  }
+  // Path is now safe - realPath is canonical and within allowed boundaries
 
   const stat = statSync(realPath);
   let skillDir, skillFile;

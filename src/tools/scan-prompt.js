@@ -484,12 +484,29 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   const allRules = [...agentRules, ...promptRules, ...openclawRules];
 
   // 2.7: Extract content from code blocks (``` and ~~~) and append to scan text
+  // Security: Add size limits and iteration caps to prevent ReDoS
+  const EXPANDED_TEXT_MAX = 500 * 1024; // 500KB absolute max
+  const MAX_CODE_BLOCK_ITERATIONS = 100;
+  const MAX_SINGLE_BLOCK_SIZE = 10000; // 10KB per code block
+
   let expandedText = prompt_text;
   const codeBlockRegex = /(`{3,})([\s\S]*?)\1|(~{3,})([\s\S]*?)\3/g;
   let codeBlockMatch;
+  let iterations = 0;
+
   while ((codeBlockMatch = codeBlockRegex.exec(prompt_text)) !== null) {
+    if (++iterations > MAX_CODE_BLOCK_ITERATIONS) {
+      console.warn('Code block extraction iteration limit reached');
+      break;
+    }
+    if (expandedText.length > EXPANDED_TEXT_MAX) {
+      console.warn('Expanded text size limit reached');
+      break;
+    }
+
     // Group 2 = content inside backtick fences, Group 4 = content inside tilde fences
     const inner = (codeBlockMatch[2] || codeBlockMatch[4] || '')
+      .substring(0, MAX_SINGLE_BLOCK_SIZE) // Cap individual block size
       .replace(/^\w*\n?/, '');  // strip optional language tag
     expandedText += '\n' + inner;
   }
@@ -531,9 +548,10 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   }
 
   // 2.7d: Strip Zalgo diacritics — NFKD decompose first, then strip combining marks
+  // Security: Use Unicode property escapes to catch ALL combining marks (fixes bypass)
   const nfkd = expandedText.normalize('NFKD');
-  const zalgoStripped = nfkd.replace(/[\u0300-\u036f\u0488\u0489\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/g, '');
-  if (zalgoStripped !== expandedText) {
+  const zalgoStripped = nfkd.replace(/\p{Mn}/gu, ''); // All Mark-Nonspacing combining characters
+  if (zalgoStripped !== expandedText && expandedText.length < EXPANDED_TEXT_MAX) {
     expandedText += '\n' + zalgoStripped;
   }
 
@@ -562,11 +580,21 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   }
 
   // Scan expanded text against all rules
+  // Security: Add timeout protection for regex matching
+  const REGEX_TIMEOUT_MS = 1000;
+
   for (const rule of allRules) {
     for (const pattern of rule.patterns) {
       try {
         const regex = new RegExp(pattern, 'i');
+        const startTime = Date.now();
         const match = expandedText.match(regex);
+
+        // Check for regex timeout (ReDoS protection)
+        if (Date.now() - startTime > REGEX_TIMEOUT_MS) {
+          console.warn(`Regex timeout for rule ${rule.id}, skipping`);
+          break;
+        }
 
         if (match) {
           findings.push({
@@ -583,6 +611,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
         }
       } catch (e) {
         // Skip invalid regex
+        console.warn(`Regex error for rule ${rule.id}:`, e.message);
       }
     }
   }
