@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./Screenshot 2026-03-04 at 8.02.35 AM.png" alt="ProofLayer Logo" width="400"/>
+<img src="./prooflayer-logo.png" alt="ProofLayer Logo" width="400"/>
 
 # agent-security-scanner-mcp
 
