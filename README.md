@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./prooflayer-scanner/logo.svg" alt="ProofLayer Logo" width="400"/>
+<img src="./prooflayer-logo.svg" alt="ProofLayer Logo" width="400"/>
 
 # agent-security-scanner-mcp
 
