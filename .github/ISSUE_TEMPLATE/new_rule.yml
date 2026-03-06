@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Propose a new security rule! Adding rules is a great first contribution.
-        See `CONTRIBUTING.md` for the rule format and naming conventions.
+        See `docs/CONTRIBUTING.md` for the rule format and naming conventions.
 
   - type: input
     id: rule-id

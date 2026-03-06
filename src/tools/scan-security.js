@@ -7,6 +7,7 @@ import { deduplicateFindings } from '../dedup.js';
 import { applyContextFilter, detectFrameworks, applyFrameworkAdjustments } from '../context.js';
 import { loadConfig, shouldExcludeFile, applyConfig } from '../config.js';
 import { discoverProjectContext } from './project-context.js';
+import { runSemanticAnalysis, isSemanticAnalysisAvailable } from '../semantic-integration.js';
 
 const MAX_FILE_SIZE = 1024 * 1024;  // 1MB - skip files larger than this to avoid timeouts
 
@@ -14,9 +15,10 @@ export const scanSecuritySchema = {
   file_path: z.string().describe("Path to the file to scan"),
   output_format: z.enum(['json', 'sarif']).optional().describe("Output format: 'json' (default) or 'sarif' for GitHub/GitLab integration"),
   verbosity: z.enum(['minimal', 'compact', 'full']).optional().describe("Response detail level: 'minimal' (counts only), 'compact' (default, actionable info), 'full' (complete metadata)"),
-  engine: z.enum(['auto', 'ast', 'regex']).optional().describe("Analysis engine: 'auto' (default, AST with regex fallback), 'ast' (tree-sitter only), 'regex' (regex only)"),
+  engine: z.enum(['auto', 'ast', 'regex', 'semantic', 'all']).optional().describe("Analysis engine: 'auto' (default, AST+semantic with regex fallback), 'ast' (tree-sitter only), 'regex' (regex only), 'semantic' (semantic/CPG only), 'all' (all engines)"),
   project_context: z.boolean().optional().describe("Include project context (framework, security middleware, dependencies)"),
-  include_context: z.boolean().optional().describe("Include surrounding code context for each issue")
+  include_context: z.boolean().optional().describe("Include surrounding code context for each issue"),
+  enable_semantic: z.boolean().optional().describe("Enable semantic/CPG analysis (default: true if available)")
 };
 
 // Verbosity formatters
@@ -64,7 +66,7 @@ function formatFull(file_path, language, issues) {
   };
 }
 
-export async function scanSecurity({ file_path, output_format, verbosity, engine, project_context, include_context }) {
+export async function scanSecurity({ file_path, output_format, verbosity, engine, project_context, include_context, enable_semantic }) {
   if (!existsSync(file_path)) {
     return {
       content: [{ type: "text", text: JSON.stringify({ error: "File not found" }) }]
@@ -101,7 +103,34 @@ export async function scanSecurity({ file_path, output_format, verbosity, engine
     };
   }
 
-  const rawIssues = await runAnalyzerAsync(file_path, engine || 'auto');
+  // Determine which engines to run
+  const engineMode = engine || 'auto';
+  const shouldRunSemantic = (enable_semantic !== false) &&
+    (engineMode === 'auto' || engineMode === 'semantic' || engineMode === 'all') &&
+    isSemanticAnalysisAvailable();
+
+  // Run primary analysis (AST/regex)
+  let rawIssues = [];
+  if (engineMode !== 'semantic') {
+    rawIssues = await runAnalyzerAsync(file_path, engineMode === 'all' ? 'auto' : engineMode);
+    if (rawIssues.error) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(rawIssues) }]
+      };
+    }
+  }
+
+  // Run semantic analysis if enabled
+  if (shouldRunSemantic) {
+    try {
+      const semanticFindings = await runSemanticAnalysis(file_path);
+      if (semanticFindings && semanticFindings.length > 0) {
+        rawIssues = rawIssues.concat(semanticFindings);
+      }
+    } catch (error) {
+      console.error('[SEMANTIC] Analysis failed, continuing without semantic findings:', error.message);
+    }
+  }
 
   if (rawIssues.error) {
     return {

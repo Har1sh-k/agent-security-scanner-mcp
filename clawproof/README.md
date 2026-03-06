@@ -253,7 +253,7 @@ Create `.clawproofrc.json` in your project root:
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! Please see [CONTRIBUTING.md](../docs/CONTRIBUTING.md) for guidelines.
 
 ### Adding New Detection Patterns
 

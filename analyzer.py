@@ -45,6 +45,9 @@ try:
 except ImportError:
     HAS_TAINT_ANALYZER = False
 
+# Semantic analyzer flag (JavaScript-based, optional)
+HAS_SEMANTIC_ANALYZER = True  # Implemented in src/semantic-analyzer.js
+
 # Import the original regex-based rules (always available)
 from rules import get_rules_for_language
 
