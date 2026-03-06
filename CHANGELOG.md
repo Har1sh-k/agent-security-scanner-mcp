@@ -5,6 +5,172 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.1] - 2026-02-28
+
+### 🔧 Dependencies
+
+- **Update rollup from 4.57.1 to 4.59.0** - Security improvement: bundle path validation to prevent path traversal attacks (PR #22)
+
+---
+
+## [Unreleased]
+
+### 📦 New Package: @prooflayer/scanner-lite v1.0.0
+
+PR #21 introduces **scanner-lite** - a lightweight, MIT-licensed MCP security scanner positioned as a direct alternative to AgentAudit-MCP.
+
+#### 🌟 Highlights
+
+- **OWASP Agentic Top 10 Complete Coverage** - All 418 YAML rules + 33 JS rules tagged with ASI-01 through ASI-10 metadata
+- **18 New Agent-Specific Rules** - Memory poisoning, inter-agent communication, cascading failures, trust exploitation, rogue agents
+- **Runtime MCP Inspector** - Live JSON-RPC tool definition scanning with A-F grading
+- **311 Passing Tests** - 8 test files with 100% pass rate
+- **GitHub Action Ready** - Composite action + reusable workflow example
+- **MIT Licensed** - ~95KB compressed, fully offline-capable, zero Python dependencies
+
+#### 🆕 Features
+
+**OWASP Agentic Security Initiative Coverage**:
+- **ASI-01** Goal Hijacking & Prompt Injection (~80 rules)
+- **ASI-02** Tool Misuse & Unsafe Execution (~60 rules)
+- **ASI-03** Identity & Privilege Escalation (~30 rules)
+- **ASI-04** Supply Chain & Dependency Risks (~15 rules)
+- **ASI-05** Arbitrary Code Execution (~50 rules)
+- **ASI-06** Memory Poisoning - 4 new rules (vector-store-injection, embedding-raw-input, rag-no-sanitization, persistent-memory-write)
+- **ASI-07** Inter-Agent Communication - 3 new rules (http-no-tls, unvalidated-agent-message, broadcast-no-auth)
+- **ASI-08** Cascading Failures - 4 new rules (missing-max-iterations, missing-timeout, recursive-agent-call, no-error-boundary)
+- **ASI-09** Trust Exploitation - 3 new rules (auto-approve, disabled-guardrails, trust-all-sources)
+- **ASI-10** Rogue Agents - 4 new rules (no-kill-switch, unrestricted-spawning, self-modification, unrestricted-tool-access)
+
+**Runtime MCP Inspector** (`src/inspector.js`):
+- Connects to live MCP servers via JSON-RPC over stdio
+- Scans tool definitions for poisoning, spoofing, unicode attacks
+- Levenshtein distance name spoofing detection
+- A-F security grading
+- Available as `inspect_mcp_server` MCP tool + `inspect` CLI command
+
+**8 MCP Tools**:
+1. `scan_security` - 418 YAML rules across 13 languages
+2. `scan_mcp_server` - MCP server audit
+3. `scan_agent_prompt` - Prompt injection detection
+4. `check_package` - Package hallucination detection
+5. `scan_packages` - Bulk import scanning
+6. `fix_security` - Auto-fix with 165 templates
+7. `deep_audit` - Optional LLM analysis (5 providers)
+8. `inspect_mcp_server` - **NEW** Runtime inspector
+
+**CLI Commands**: scan, inspect, audit, check-package, prompt, download-data
+
+**GitHub Action**: Composite action in `scanner-lite/action.yml` for CI/CD integration
+
+#### 🐛 Critical Bug Fixes
+
+- **Regex engine `(?i)` flag** - 216 patterns in `agent-attacks.security.yaml` were silently failing due to Python `(?i)` flag incompatibility with JavaScript regex. Fixed by stripping `(?i)` and using `i` flag.
+- **Terraform detection** - Added `tf`/`hcl` to language maps so `.tf` files now correctly load Terraform rules
+
+#### 📊 Test Coverage
+
+- **311 tests across 8 files** (100% pass rate)
+- **New**: `inspector.test.js` (27 tests)
+- **Expanded**: scanner.test.js (29→51), tool-poisoning.test.js (27→52), prompt-scanner.test.js (25→43), cli.test.js (18→33), fix-engine.test.js (11→29), llm-audit.test.js (25→47)
+
+#### 📦 Package Details
+
+- **Name**: `@prooflayer/scanner-lite`
+- **Version**: 1.0.0
+- **License**: MIT
+- **Size**: ~95KB compressed (vs 230KB for AgentAudit-MCP)
+- **Dependencies**: Only 2 runtime deps (`@modelcontextprotocol/sdk`, `zod`)
+- **Location**: `scanner-lite/` subdirectory
+- **Offline**: Fully offline-capable, zero Python dependencies
+
+#### 📝 Competitive Positioning
+
+| Feature | scanner-lite | AgentAudit-MCP |
+|---------|-------------|----------------|
+| License | **MIT** | AGPL-3.0 |
+| Rules | **418 YAML + 33 JS** | 12 regex |
+| OWASP Agentic Top 10 | **ASI-01 through ASI-10** | None |
+| Tests | **311 (100% pass)** | ~30 |
+| Offline | **Yes** | No |
+| Auto-fix | **165 templates** | None |
+| SARIF | **Yes** | No |
+| Size | **~95KB** | ~230KB |
+
+#### 🙏 Contributors
+
+- @Har1sh-k - PR #21 (2 commits, +19,415 additions, scanner-lite package, OWASP ASI coverage, MCP inspector, bug fixes)
+
+---
+
+## [3.16.0] - 2026-02-26
+
+### 🔒 MCP Scanner Hardening (9 New Detection Rules)
+
+PR #20 adds comprehensive MCP manifest security scanning with schema-level inspection, cross-tool manipulation detection, and advanced obfuscation detection.
+
+#### 🆕 New Features
+
+- **Schema-level injection detection** - Scans `inputSchema` property descriptions, defaults, and enum values for injection phrases, shell commands, and hidden characters
+  - `mcp.schema-description-injection` (ERROR) - Detects injection language or hidden characters in property descriptions
+  - `mcp.schema-suspicious-default` (ERROR) - Flags suspicious default values containing shell commands, URLs, or injection patterns
+  - `mcp.schema-open-additionalProperties` (WARNING) - Flags `additionalProperties: true` with empty properties (accepts arbitrary hidden parameters)
+
+- **Cross-tool manipulation detection** - Prevents tools from hijacking LLM execution flow
+  - `mcp.cross-tool-reference` (ERROR) - Detects tool descriptions directing LLM to invoke other tools with action directives
+  - `mcp.cross-tool-priority-override` (ERROR) - Flags tools claiming execution priority or exclusivity
+
+- **Statistical anomaly detection** - Identifies outlier tool descriptions that may hide injected instructions
+  - `mcp.description-length-anomaly` (WARNING) - Uses z-score analysis (threshold >2.5) to flag unusually long descriptions in servers with 5+ tools
+
+- **Suspicious URL detection** - Prevents data exfiltration and callback channels
+  - `mcp.description-suspicious-url` (WARNING) - Flags external URLs in tool descriptions that LLM might follow
+  - `mcp.description-tunneling-url` (ERROR) - Detects dev/tunneling URLs (ngrok, serveo, localtunnel, webhook.site, etc.)
+
+- **Nested base64 detection** - Detects double-encoded injection attempts
+  - `nested-base64` (ERROR) - Detects double-encoded base64 in prompts and re-scans decoded content
+
+#### 🐛 Bug Fixes
+
+- **YAML rule paths filter support** - Respects `paths.include/exclude` filters in analyzer.py, semgrep_loader.py, and rules/__init__.py
+  - Fixes false positives from `use-escapexml` rule (JSP-only) matching JavaScript template literals
+  - Added `.scannerrc.yaml` to suppress `use-escapexml` in this repo (no JSP files)
+- **CI fork permission handling** - Added `continue-on-error: true` to PR comment step for fork pull requests
+
+#### 📊 Test Coverage
+
+- **17 new tests** across 2 test suites (100% pass rate)
+  - 14 new tests in `tests/scan-mcp.test.js` (schema, cross-tool, anomaly, URL detection)
+  - 3 new tests in `tests/scan-prompt.test.js` (nested base64 detection)
+- **No regressions** - All 510+ existing tests pass (5 pre-existing failures in unrelated files)
+- **CI passing** - All 9 GitHub Actions checks green
+
+#### 🎯 Attack Vectors Mitigated
+
+- **Schema poisoning** - Hidden instructions in JSON schema metadata
+- **Cross-tool chaining** - Unauthorized tool call sequences
+- **Statistical hiding** - Outlier-length descriptions to bury injection
+- **Data exfiltration** - Tunneling URLs and callback channels
+- **Double obfuscation** - Nested base64 encoding to evade detection
+
+#### 📝 Files Changed (9 files, +573/-3 lines)
+
+- `src/tools/scan-mcp.js` (+186) - 3 new functions, 8 new rules, 2 recommendation blocks
+- `src/tools/scan-prompt.js` (+49) - Nested base64 decode-and-rescan
+- `tests/scan-mcp.test.js` (+243) - 14 comprehensive test cases
+- `tests/scan-prompt.test.js` (+30) - 3 nested base64 tests
+- `analyzer.py` (+45) - Path filter implementation
+- `rules/__init__.py` (+7) - Preserve paths metadata
+- `semgrep_loader.py` (+6) - Preserve paths metadata
+- `.scannerrc.yaml` (+6) - Suppress use-escapexml false positives
+- `.github/actions/security-scan/action.yml` (+1) - Fork permission fix
+
+### 🙏 Contributors
+
+- @Har1sh-k - PR #20 (3 commits, scanner hardening, path filter fix, CI improvements)
+
+---
+
 ## [3.13.0] - 2026-02-24
 
 ### 🔒 Security

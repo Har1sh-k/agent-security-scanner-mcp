@@ -387,7 +387,8 @@ describe('Path traversal protection', { timeout: 60000 }, () => {
     const raw = await scanSkill({ skill_path: join(__dirname, '..', '..', '..', 'etc') });
     const result = parseResult(raw);
     expect(result.error).toBeDefined();
-    expect(result.error).toContain('skill_path must be within');
+    // Security fix: realpathSync() now validates before containment check
+    expect(result.error).toMatch(/skill_path must be within|Invalid path/);
   });
 });
 

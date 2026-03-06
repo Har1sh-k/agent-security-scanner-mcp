@@ -238,51 +238,70 @@ server.tool(
 // See src/cli/init.js, src/cli/doctor.js, src/cli/demo.js
 
 // Handle CLI arguments before loading heavy package data
+// Security: Wrap in async IIFE to prevent unhandled promise rejections and race conditions
 const cliArgs = process.argv.slice(2);
-if (cliArgs[0] === 'init') {
-  runInit(cliArgs.slice(1)).then(() => process.exit(0)).catch((err) => {
-    console.error(`  Error: ${err.message}\n`);
-    process.exit(1);
-  });
-} else if (cliArgs[0] === 'doctor') {
-  runDoctor(cliArgs.slice(1)).then(() => process.exit(0)).catch((err) => {
-    console.error(`  Error: ${err.message}\n`);
-    process.exit(1);
-  });
-} else if (cliArgs[0] === 'demo') {
-  runDemo(cliArgs.slice(1)).then(() => process.exit(0)).catch((err) => {
-    console.error(`  Error: ${err.message}\n`);
-    process.exit(1);
-  });
-} else if (cliArgs[0] === 'init-hooks') {
-  runInitHooks(cliArgs.slice(1)).then(() => process.exit(0)).catch((err) => {
-    console.error(`  Error: ${err.message}\n`);
-    process.exit(1);
-  });
-} else if (cliArgs[0] === 'report') {
-  runReport(cliArgs.slice(1)).then(() => process.exit(0)).catch((err) => {
-    console.error(`  Error: ${err.message}\n`);
-    process.exit(1);
-  });
-} else if (cliArgs[0] === 'scan-prompt') {
-  // CLI mode: scan-prompt <text> [--verbosity minimal|compact|full]
-  const text = cliArgs[1];
-  if (!text) {
-    console.error('Usage: agent-security-scanner-mcp scan-prompt <text> [--verbosity minimal|compact|full]');
-    process.exit(1);
-  }
-  const verbosityIdx = cliArgs.indexOf('--verbosity');
-  const verbosity = verbosityIdx !== -1 ? cliArgs[verbosityIdx + 1] : 'compact';
 
-  loadPackageLists();
-  scanAgentPrompt({ prompt_text: text, verbosity }).then(result => {
-    const output = JSON.parse(result.content[0].text);
-    console.log(JSON.stringify(output, null, 2));
-    process.exit(output.action === 'BLOCK' ? 1 : 0);
-  }).catch(err => {
-    console.error(JSON.stringify({ error: err.message }));
-    process.exit(1);
-  });
+(async () => {
+  if (cliArgs[0] === 'init') {
+    try {
+      await runInit(cliArgs.slice(1));
+      process.exit(0);
+    } catch (err) {
+      console.error(`  Error: ${err.message}\n`);
+      process.exit(1);
+    }
+  } else if (cliArgs[0] === 'doctor') {
+    try {
+      await runDoctor(cliArgs.slice(1));
+      process.exit(0);
+    } catch (err) {
+      console.error(`  Error: ${err.message}\n`);
+      process.exit(1);
+    }
+  } else if (cliArgs[0] === 'demo') {
+    try {
+      await runDemo(cliArgs.slice(1));
+      process.exit(0);
+    } catch (err) {
+      console.error(`  Error: ${err.message}\n`);
+      process.exit(1);
+    }
+  } else if (cliArgs[0] === 'init-hooks') {
+    try {
+      await runInitHooks(cliArgs.slice(1));
+      process.exit(0);
+    } catch (err) {
+      console.error(`  Error: ${err.message}\n`);
+      process.exit(1);
+    }
+  } else if (cliArgs[0] === 'report') {
+    try {
+      await runReport(cliArgs.slice(1));
+      process.exit(0);
+    } catch (err) {
+      console.error(`  Error: ${err.message}\n`);
+      process.exit(1);
+    }
+  } else if (cliArgs[0] === 'scan-prompt') {
+    // CLI mode: scan-prompt <text> [--verbosity minimal|compact|full]
+    const text = cliArgs[1];
+    if (!text) {
+      console.error('Usage: agent-security-scanner-mcp scan-prompt <text> [--verbosity minimal|compact|full]');
+      process.exit(1);
+    }
+    const verbosityIdx = cliArgs.indexOf('--verbosity');
+    const verbosity = verbosityIdx !== -1 ? cliArgs[verbosityIdx + 1] : 'compact';
+
+    try {
+      loadPackageLists();
+      const result = await scanAgentPrompt({ prompt_text: text, verbosity });
+      const output = JSON.parse(result.content[0].text);
+      console.log(JSON.stringify(output, null, 2));
+      process.exit(output.action === 'BLOCK' ? 1 : 0);
+    } catch (err) {
+      console.error(JSON.stringify({ error: err.message }));
+      process.exit(1);
+    }
 } else if (cliArgs[0] === 'scan-security') {
   // CLI mode: scan-security <file> [--verbosity minimal|compact|full] [--format json|sarif]
   const filePath = cliArgs[1];
@@ -562,3 +581,4 @@ if (cliArgs[0] === 'init') {
     process.exit(1);
   });
 }
+})(); // Close async IIFE

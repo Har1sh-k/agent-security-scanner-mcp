@@ -10,9 +10,7 @@
       "Bash(gh run list:*)",
       "Bash(clawhub inspect:*)",
       "Bash(gh pr view:*)",
-      "Bash(npm test:*)",
-      "Bash(DATABASE_URL='postgresql://clawhub:YBZCKniifYuzbjFdFCP7OUliQUrj1yQ%2FNtPdAbI1t20%3D@127.0.0.1:5433/clawhub' npx prisma db push:*)",
-      "Bash(node:*)"
+      "Bash(npm test:*)"
     ]
   }
 }

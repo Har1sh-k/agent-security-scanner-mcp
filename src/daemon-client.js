@@ -40,11 +40,24 @@ class DaemonClient {
   async ensureRunning() {
     if (this._dead) throw new Error('Daemon permanently unavailable');
     if (this._proc && !this._proc.killed && this._proc.exitCode === null) return;
+
+    // Security: Fix race condition - create promise synchronously before any await
     if (this._starting) return this._starting;
 
-    this._starting = this._spawn();
+    // Create promise SYNCHRONOUSLY to prevent race window
+    const spawnPromise = (async () => {
+      try {
+        await this._spawn();
+      } catch (err) {
+        this._starting = null; // Clear on error
+        throw err;
+      }
+    })();
+
+    this._starting = spawnPromise;
+
     try {
-      await this._starting;
+      await spawnPromise;
     } finally {
       this._starting = null;
     }
@@ -218,12 +231,46 @@ class DaemonClient {
 
   async shutdown() {
     if (!this._proc || this._proc.killed || this._proc.exitCode !== null) return;
+
+    // Security: Fix process orphaning with timeout and SIGKILL fallback
+    // Try graceful shutdown first (5 second timeout)
     try {
-      await this._send({ action: 'shutdown' });
-    } catch {
-      // ignore — process may already be gone
+      await Promise.race([
+        this._send({ action: 'shutdown' }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout')), 5000))
+      ]);
+    } catch (err) {
+      console.warn(`Graceful daemon shutdown failed: ${err.message}. Force-killing.`);
     }
+
+    // Force kill if still running
+    if (this._proc && !this._proc.killed && this._proc.exitCode === null) {
+      try {
+        this._proc.kill('SIGKILL');
+      } catch (err) {
+        console.error(`Failed to kill daemon process:`, err.message);
+      }
+    }
+
     this._cleanup();
+
+    // Wait for process to actually exit (with timeout)
+    if (this._proc) {
+      await new Promise(resolve => {
+        const checkInterval = setInterval(() => {
+          if (!this._proc || this._proc.exitCode !== null) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+
+        // Timeout after 2 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          resolve();
+        }, 2000);
+      });
+    }
   }
 }
 

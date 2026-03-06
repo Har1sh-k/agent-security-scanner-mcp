@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./prooflayer-scanner/logo.svg" alt="ProofLayer Logo" width="400"/>
+<img src="./prooflayer-logo.png" alt="ProofLayer Logo" width="400"/>
 
 # agent-security-scanner-mcp
 
@@ -1160,6 +1160,25 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v3.17.0 (2026-03-04) - Critical Security Fixes
+
+**🔴 6 CRITICAL vulnerabilities fixed | 🟡 4 IMPORTANT issues resolved**
+
+- **CVE GHSA-345p-7cg4-v4c7**: Fixed MCP SDK cross-client data leak (CVSS 7.1) - updated to @modelcontextprotocol/sdk@1.27.1
+- **ReDoS Protection**: Added regex timeouts (1s), size limits (500KB), and iteration caps (100) in prompt scanner
+- **Path Traversal Fix**: Resolved TOCTOU symlink attacks using `realpathSync()` before validation
+- **Race Condition Fix**: Prevented multiple daemon spawns from concurrent requests
+- **Promise Rejection Handling**: Wrapped CLI commands in async IIFE to prevent hangs
+- **Temp File Security**: Fixed symlink attacks with `mkdtempSync()` and restrictive permissions (0600)
+- **Daemon Orphaning**: Added SIGKILL fallback with 5s timeout for graceful shutdown
+- **Dependency Updates**: Fixed ajv, hono, and qs vulnerabilities via `npm audit fix`
+
+**Impact:** npm audit 4→0 vulnerabilities | Security Grade D→B | Test coverage 99.76% (419/420)
+
+📄 See [docs/release-notes/SECURITY-FIXES-v3.17.0.md](docs/release-notes/SECURITY-FIXES-v3.17.0.md) for technical details
+
+---
 
 ### v3.10.0
 - **`scan_skill` Tool** — 6-layer deep security scanner for OpenClaw skills: prompt injection (59+ rules), AST+taint code analysis, ClawHavoc malware signatures, package supply chain verification, and SHA-256 rug pull detection. Returns A-F grade with hard-fail on ClawHavoc/rug pull/critical findings

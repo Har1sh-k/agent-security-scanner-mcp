@@ -109,6 +109,12 @@ def load_yaml_rules():
                         if not extracted:
                             continue
 
+                        metadata = rule.get('metadata', {})
+                        # Preserve paths.include/exclude for file-level filtering
+                        paths = rule.get('paths')
+                        if paths and isinstance(paths, dict):
+                            metadata['paths'] = paths
+
                         rules[rule_id] = {
                             'id': rule_id,
                             'name': rule_id.split('.')[-1].replace('-', ' ').title(),
@@ -116,7 +122,7 @@ def load_yaml_rules():
                             'message': rule.get('message', ''),
                             'severity': rule.get('severity', 'WARNING').lower(),
                             'languages': rule.get('languages', ['generic']),
-                            'metadata': rule.get('metadata', {})
+                            'metadata': metadata
                         }
             except Exception as e:
                 print(f"Error loading {filepath}: {e}")
