@@ -62,7 +62,7 @@ Continue reading below for full version documentation →
 
 ---
 
-> **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 777 ClawHub skills and found 69.5% have security issues. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Reports](./clawhub-security-reports/).
+> **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 16,532 ClawHub skills and found 46% have critical vulnerabilities. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Dashboard](https://www.proof-layer.com/dashboard).
 >
 > **Also in v3.10.0:** ClawProof OpenClaw plugin — 6-layer deep skill scanner (`scan_skill`) with ClawHavoc malware signatures (27 rules, 121 patterns covering reverse shells, crypto miners, info stealers, C2 beacons, and OpenClaw-specific attacks), package supply chain verification, and rug pull detection.
 >
@@ -150,7 +150,7 @@ clawproof scan ./SKILL.md
 - **30.5%** are completely safe (Grade A)
 - **4,129** prompt injection patterns detected
 
-See [ClawHub Security Reports](./clawhub-security-reports/) for full analysis.
+See [ClawHub Security Dashboard](https://www.proof-layer.com/dashboard) for interactive exploration of all 16,532 skills with searchable security grades and detailed findings.
 
 **Detection Capabilities:**
 - Prompt Injection (15 patterns): "ignore previous instructions", role manipulation

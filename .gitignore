@@ -45,6 +45,10 @@ clawhub-scan-full/
 clawhub-package/
 test-skills/
 skills/clawhub/
+clawhub-security-reports/
+
+# Dashboard (private, GCP deployment only)
+clawhub-dashboard/
 
 # Test artifacts
 test-skill.md
