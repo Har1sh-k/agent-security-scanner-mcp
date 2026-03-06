@@ -8,35 +8,40 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { loadPackageLists } from '../src/tools/check-package.js';
+import { scanSkill as scanSkillTool } from '../src/tools/scan-skill.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const SKILLS_DIR = path.join(__dirname, 'clawhub-skills');
+const SKILLS_DIR = path.join(__dirname, 'clawhub-skills', 'skills');
 const OUTPUT_FILE = path.join(__dirname, 'CLAWHUB-PROMPT-SECURITY-REPORT.json');
 const SUMMARY_FILE = path.join(__dirname, 'CLAWHUB-PROMPT-SECURITY-SUMMARY.md');
 
 async function findAllSkillFiles() {
   const skills = [];
-  const entries = await fs.readdir(SKILLS_DIR);
+  const authors = await fs.readdir(SKILLS_DIR);
 
-  for (const entry of entries) {
-    const skillDir = path.join(SKILLS_DIR, entry);
-    const stat = await fs.stat(skillDir);
+  for (const author of authors) {
+    const authorDir = path.join(SKILLS_DIR, author);
+    const authorStat = await fs.stat(authorDir);
+    if (!authorStat.isDirectory()) continue;
 
-    if (stat.isDirectory()) {
-      const skillFile = path.join(skillDir, 'SKILL.md');
-      try {
-        await fs.access(skillFile);
-        skills.push({
-          slug: entry,
-          path: skillFile
-        });
-      } catch (err) {
-        // SKILL.md not found in this directory
+    const entries = await fs.readdir(authorDir);
+    for (const entry of entries) {
+      const skillDir = path.join(authorDir, entry);
+      const stat = await fs.stat(skillDir);
+
+      if (stat.isDirectory()) {
+        const skillFile = path.join(skillDir, 'SKILL.md');
+        try {
+          await fs.access(skillFile);
+          skills.push({
+            slug: `${author}/${entry}`,
+            path: skillFile
+          });
+        } catch (err) {
+          // SKILL.md not found in this directory
+        }
       }
     }
   }
@@ -46,37 +51,13 @@ async function findAllSkillFiles() {
 
 async function scanSkill(skillPath) {
   try {
-    // Convert to relative path for CLI validation
-    const relativePath = path.relative(process.cwd(), skillPath);
-
-    const { stdout } = await execFileAsync('node', [
-      path.join(__dirname, 'index.js'),
-      'scan-skill',
-      relativePath,
-      '--verbosity',
-      'minimal'
-    ], {
-      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-      timeout: 30000 // 30s timeout per skill
-    });
-
-    // Parse JSON from stdout (skip bloom filter loading messages)
-    // The JSON is at the END of the output, after all bloom filter messages
-    const lines = stdout.trim().split('\n');
-
-    // Find the LAST line that starts with {
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].trim().startsWith('{')) {
-        try {
-          return JSON.parse(lines[i]);
-        } catch (e) {
-          // Try next line if this one fails
-          continue;
-        }
-      }
+    const result = await scanSkillTool({ skill_path: skillPath, verbosity: 'compact' });
+    const parsed = JSON.parse(result.content[0].text);
+    // Convert absolute skill_path to relative from the skills dir
+    if (parsed.skill_path) {
+      parsed.skill_path = path.relative(SKILLS_DIR, parsed.skill_path).replace(/\\/g, '/');
     }
-
-    return { error: 'No JSON output found' };
+    return parsed;
   } catch (error) {
     return {
       error: error.message,
@@ -278,37 +259,43 @@ See \`CLAWHUB-PROMPT-SECURITY-REPORT.json\` for complete scan results with all f
 async function main() {
   console.log('🔍 Starting ClawHub Prompt Security Analysis\n');
 
+  // Load bloom filters once (avoids reloading ~60MB per skill scan)
+  console.log('📦 Loading package bloom filters...');
+  loadPackageLists();
+  console.log('✅ Bloom filters loaded\n');
+
   // Find all SKILL.md files
   console.log('📁 Discovering skills...');
   const skills = await findAllSkillFiles();
   console.log(`✅ Found ${skills.length} skills\n`);
 
-  // Scan all skills
-  console.log('🔐 Scanning skills for prompt injection...\n');
+  // Scan all skills with a concurrency pool — fast skills don't wait for slow ones
+  const CONCURRENCY = 8;
+  console.log(`🔐 Scanning skills for prompt injection (${CONCURRENCY} parallel)...\n`);
   const results = [];
+  let completed = 0;
+  let nextIndex = 0;
 
-  for (let i = 0; i < skills.length; i++) {
-    const skill = skills[i];
-    const progress = `[${i + 1}/${skills.length}]`;
+  async function worker() {
+    while (nextIndex < skills.length) {
+      const idx = nextIndex++;
+      const skill = skills[idx];
+      const result = await scanSkill(skill.path);
+      const relPath = path.relative(SKILLS_DIR, skill.path).replace(/\\/g, '/');
+      const entry = { slug: skill.slug, path: relPath, ...result };
+      results.push(entry);
+      completed++;
+      const status = entry.error ? '❌ ERROR' : `${entry.grade} (${entry.findings_count} findings)`;
+      console.log(`[${completed}/${skills.length}] ${entry.slug}... ${status}`);
 
-    process.stdout.write(`${progress} Scanning ${skill.slug}... `);
-
-    const result = await scanSkill(skill.path);
-    results.push({
-      slug: skill.slug,
-      path: skill.path,
-      ...result
-    });
-
-    const status = result.error ? '❌ ERROR' : `${result.grade} (${result.findings_count} findings)`;
-    console.log(status);
-
-    // Save intermediate results every 50 skills
-    if ((i + 1) % 50 === 0) {
-      await fs.writeFile(OUTPUT_FILE, JSON.stringify(results, null, 2));
-      console.log(`💾 Checkpoint saved (${i + 1} skills scanned)\n`);
+      if (completed % 200 === 0) {
+        await fs.writeFile(OUTPUT_FILE, JSON.stringify(results, null, 2));
+        console.log(`💾 Checkpoint saved (${completed} skills scanned)\n`);
+      }
     }
   }
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
   // Save final results
   await fs.writeFile(OUTPUT_FILE, JSON.stringify(results, null, 2));

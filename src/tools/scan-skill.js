@@ -1007,7 +1007,7 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     const [promptFindings, codeBlockFindings, supportingFindings, supplyChainFindings] =
       await Promise.all([
         timed('prompt_scan', () => runPromptScan(content)),                                                  // L1
-        timed('code_blocks', () => runCodeBlockScan(codeBlocks, signal)),                                    // L2
+        timed('code_blocks', () => runCodeBlockScan(codeBlocks, signal)),          // L2
         timed('supporting_files', () => runSupportingFilesScan(skillDir, skillFile, collectedFiles, signal)), // L3
         timed('supply_chain', () => runSupplyChainScan(codeBlocks, skillDir, skillFile, collectedFiles, signal)), // L5
       ]);
