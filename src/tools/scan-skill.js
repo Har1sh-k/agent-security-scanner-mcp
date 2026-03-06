@@ -900,9 +900,21 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     // Resolve to canonical path immediately (defeats symlink attacks)
     realPath = realpathSync(resolve(inputPath));
   } catch (err) {
+    // Check for different error types
+    let errorMessage;
+    if (err.code === 'ENOENT') {
+      errorMessage = "Path not found";
+    } else if (err.code === 'ELOOP') {
+      errorMessage = "Symlink loop detected";
+    } else if (err.code === 'EACCES') {
+      errorMessage = "Permission denied";
+    } else {
+      errorMessage = "Invalid path";
+    }
+
     return {
       content: [{ type: "text", text: JSON.stringify({
-        error: "Invalid path, symlink loop, or permission denied",
+        error: errorMessage,
         skill_path: inputPath,
         details: err.message
       }) }]

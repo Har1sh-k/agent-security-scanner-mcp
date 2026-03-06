@@ -373,7 +373,8 @@ describe('Path traversal protection', { timeout: 60000 }, () => {
     const raw = await scanSkill({ skill_path: '../../etc' });
     const result = parseResult(raw);
     expect(result.error).toBeDefined();
-    expect(result.error).toContain('skill_path must be within');
+    // Path may not exist (Path not found) or may be rejected (skill_path must be within)
+    expect(result.error).toMatch(/skill_path must be within|Path not found/);
   });
 
   it('rejects absolute path to system directory', async () => {
@@ -388,7 +389,8 @@ describe('Path traversal protection', { timeout: 60000 }, () => {
     const result = parseResult(raw);
     expect(result.error).toBeDefined();
     // Security fix: realpathSync() now validates before containment check
-    expect(result.error).toMatch(/skill_path must be within|Invalid path/);
+    // Path may not exist (Path not found) or may be rejected (skill_path must be within)
+    expect(result.error).toMatch(/skill_path must be within|Invalid path|Path not found/);
   });
 });
 
