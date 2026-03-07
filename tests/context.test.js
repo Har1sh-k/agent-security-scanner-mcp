@@ -215,7 +215,7 @@ describe('isTestFile', () => {
   it('should detect fixture/demo directories', () => {
     expect(isTestFile('/project/fixtures/sample.js')).toBe(true);
     expect(isTestFile('/project/demo/vuln.py')).toBe(true);
-    expect(isTestFile('/project/test-files/data.js')).toBe(true);
+    expect(isTestFile('/project/tests/fixtures/test-files/data.js')).toBe(true);
   });
 
   it('should NOT match production code', () => {

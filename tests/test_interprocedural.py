@@ -193,7 +193,7 @@ def safe_route():
 # ============================================================
 def test_intra_regression():
     """Existing intra-procedural Tests 1-6 should still be detected."""
-    findings = run_analyzer(open(os.path.join(ANALYZER_DIR, 'test-files/test_taint_python.py')).read())
+    findings = run_analyzer(open(os.path.join(ANALYZER_DIR, 'tests/fixtures/test-files/test_taint_python.py')).read())
     tf = taint_findings(findings)
     tainted_vars = {f.get('metadata', {}).get('tainted_variable') for f in tf}
 

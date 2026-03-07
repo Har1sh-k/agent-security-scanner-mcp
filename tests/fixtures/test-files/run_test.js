@@ -48,9 +48,9 @@ function extractPackages(code, ecosystem) {
 
 // Test files
 const testFiles = [
-  { file: 'test-files/test_hallucination.dart', eco: 'dart' },
-  { file: 'test-files/test_hallucination.pl', eco: 'perl' },
-  { file: 'test-files/test_hallucination.raku', eco: 'raku' }
+  { file: 'tests/fixtures/test-files/test_hallucination.dart', eco: 'dart' },
+  { file: 'tests/fixtures/test-files/test_hallucination.pl', eco: 'perl' },
+  { file: 'tests/fixtures/test-files/test_hallucination.raku', eco: 'raku' }
 ];
 
 console.log('\n' + '='.repeat(60));
