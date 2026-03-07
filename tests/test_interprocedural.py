@@ -6,7 +6,7 @@ import os
 import tempfile
 
 
-ANALYZER_DIR = os.path.dirname(__file__)
+ANALYZER_DIR = os.path.join(os.path.dirname(__file__), '..')
 
 
 def run_analyzer(code, suffix='.py'):

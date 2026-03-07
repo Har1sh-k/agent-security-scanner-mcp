@@ -12,7 +12,7 @@ def test_ast_modules_importable():
         result = subprocess.run(
             [sys.executable, '-c', f'import {mod}'],
             capture_output=True, text=True,
-            cwd=os.path.join(os.path.dirname(__file__), '')
+            cwd=os.path.join(os.path.dirname(__file__), '..')
         )
         assert result.returncode == 0, f"Failed to import {mod}: {result.stderr}"
 
@@ -31,7 +31,7 @@ cursor.execute("SELECT * FROM users WHERE id = " + user_id)
         result = subprocess.run(
             [sys.executable, 'analyzer.py', f.name],
             capture_output=True, text=True,
-            cwd=os.path.dirname(__file__)
+            cwd=os.path.join(os.path.dirname(__file__), '..')
         )
         os.unlink(f.name)
 
@@ -54,7 +54,7 @@ document.write("<div>" + userInput + "</div>");
         result = subprocess.run(
             [sys.executable, 'analyzer.py', f.name],
             capture_output=True, text=True,
-            cwd=os.path.dirname(__file__)
+            cwd=os.path.join(os.path.dirname(__file__), '..')
         )
         os.unlink(f.name)
 
@@ -79,7 +79,7 @@ void process(char *input) {
         result = subprocess.run(
             [sys.executable, 'analyzer.py', f.name],
             capture_output=True, text=True,
-            cwd=os.path.dirname(__file__)
+            cwd=os.path.join(os.path.dirname(__file__), '..')
         )
         os.unlink(f.name)
 
@@ -96,7 +96,7 @@ def test_analyzer_backward_compat_output_format():
         result = subprocess.run(
             [sys.executable, 'analyzer.py', f.name],
             capture_output=True, text=True,
-            cwd=os.path.dirname(__file__)
+            cwd=os.path.join(os.path.dirname(__file__), '..')
         )
         os.unlink(f.name)
 
