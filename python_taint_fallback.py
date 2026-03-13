@@ -510,6 +510,7 @@ class _PythonTaintAnalyzer:
                 local_env = _merge_taint_envs(local_env)
 
             elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While, ast.With, ast.AsyncWith)):
+                findings.extend(self._statement_findings(stmt, local_env))
                 findings.extend(self._analyze_statements(stmt.body, dict(local_env)))
                 findings.extend(self._analyze_statements(getattr(stmt, "orelse", []), dict(local_env)))
 
