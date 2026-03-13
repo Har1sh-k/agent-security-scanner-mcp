@@ -106,7 +106,7 @@ def analyze_file_regex(file_path):
     issues = []
     try:
         language = detect_language(file_path)
-        all_rules = get_rules_for_language(language)
+        all_rules = get_rules_for_language(language, file_path)
         # Filter out rules whose paths.include/exclude don't match this file
         rules = {}
         basename = os.path.basename(file_path)
