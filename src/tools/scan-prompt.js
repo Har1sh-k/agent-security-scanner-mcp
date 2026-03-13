@@ -63,6 +63,13 @@ let _agentAttackRulesCache = null;
 let _promptInjectionRulesCache = null;
 let _openClawRulesCache = null;
 
+function normalizeYamlRegexPattern(pattern) {
+  return pattern
+    .replace(/^["']|["']$/g, '')
+    .replace(/\(\?i\)/g, '')
+    .replace(/\\\\/g, '\\');
+}
+
 // Load agent attack rules from YAML
 function loadAgentAttackRules() {
   if (_agentAttackRulesCache !== null) return _agentAttackRulesCache;
@@ -108,11 +115,7 @@ function loadAgentAttackRules() {
           inMetadata = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          // Strip Python-style inline flags - JS doesn't support them
-          pattern = pattern.replace(/^\(\?i\)/, '');
-          // Unescape double backslashes from YAML (\\s -> \s)
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (inMetadata && line.match(/^\s+\w+:/)) {
           const match = line.match(/^\s+(\w+):\s*["']?([^"'\n]+)["']?/);
@@ -182,11 +185,7 @@ function loadPromptInjectionRules() {
           inMetadata = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          // Strip Python-style inline flags - JS doesn't support them
-          pattern = pattern.replace(/^\(\?i\)/, '');
-          // Unescape double backslashes from YAML (\\s -> \s)
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (inMetadata && line.match(/^\s+\w+:/)) {
           const match = line.match(/^\s+(\w+):\s*["']?([^"'\n]+)["']?/);
@@ -253,8 +252,7 @@ function loadOpenClawRules() {
           inPatterns = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (line.match(/^\s+\w+:/) && !line.match(/^\s+- /)) {
           inPatterns = false;
@@ -586,7 +584,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   for (const rule of allRules) {
     for (const pattern of rule.patterns) {
       try {
-        const regex = new RegExp(pattern, 'i');
+        const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
         const startTime = Date.now();
         const match = expandedText.match(regex);
 
@@ -631,7 +629,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
             if (!rule.id.startsWith('generic.prompt')) continue;
             for (const pattern of rule.patterns) {
               try {
-                const regex = new RegExp(pattern, 'i');
+                const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
                 const match = decoded.match(regex);
                 if (match) {
                   findings.push({
@@ -674,7 +672,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
                   for (const rule of allRules) {
                     for (const pattern of rule.patterns) {
                       try {
-                        const regex = new RegExp(pattern, 'i');
+                        const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
                         const match = innerDecoded.match(regex);
                         if (match) {
                           findings.push({
@@ -718,7 +716,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
       for (const rule of allRules) {
         for (const pattern of rule.patterns) {
           try {
-            const regex = new RegExp(pattern, 'i');
+            const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
             if (regex.test(prevMsg)) {
               prevTotalScore += parseInt(rule.metadata?.risk_score || '50') / 100;
               msgHasMatch = true;
