@@ -11,15 +11,21 @@ ANALYZER_DIR = os.path.join(os.path.dirname(__file__), '..')
 
 def run_analyzer(code, suffix='.py'):
     """Run analyzer on code snippet, return parsed JSON findings."""
-    with tempfile.NamedTemporaryFile(suffix=suffix, mode='w', delete=False) as f:
-        f.write(code)
-        f.flush()
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, mode='w', delete=False)
+    try:
+        tmp.write(code)
+        tmp.flush()
+        tmp.close()
         result = subprocess.run(
-            [sys.executable, 'analyzer.py', f.name],
+            [sys.executable, 'analyzer.py', tmp.name],
             capture_output=True, text=True,
             cwd=ANALYZER_DIR
         )
-        os.unlink(f.name)
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
     return json.loads(result.stdout)
 
 
