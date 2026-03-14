@@ -9,6 +9,7 @@ import { readFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { resolvePythonCommand, pythonArgs } from './python.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,10 +66,12 @@ export async function runSemanticAnalysis(filePath, options = {}) {
  */
 async function getASTFromPython(filePath) {
   try {
+    const pyCmd = resolvePythonCommand();
     const analyzerPath = path.join(__dirname, '..', 'ast_parser.py');
 
-    // Call Python AST parser
-    const result = execFileSync('python3', [
+    // Call Python AST parser via the analyzer wrapper which outputs JSON
+    const result = execFileSync(pyCmd, [
+      ...pythonArgs(),
       analyzerPath,
       '--ast-only',
       filePath
@@ -239,14 +242,29 @@ function parseSimpleYAML(yamlContent) {
 /**
  * Check if semantic analysis is available
  */
+let _semanticAvailable = null;
+
 export function isSemanticAnalysisAvailable() {
+  if (_semanticAvailable !== null) return _semanticAvailable;
   try {
-    // Check if Python is available
-    execFileSync('python3', ['--version'], { stdio: 'pipe' });
-    return true;
-  } catch (error) {
-    return false;
+    const pyCmd = resolvePythonCommand();
+    // Verify that Python 3 exists AND tree-sitter can be imported, which is
+    // the actual prerequisite for AST extraction.  A bare "python --version"
+    // check was giving false positives on systems without tree-sitter.
+    execFileSync(pyCmd, [
+      ...pythonArgs(),
+      '-c',
+      'import tree_sitter; import ast_parser'
+    ], {
+      stdio: 'pipe',
+      timeout: 10000,
+      cwd: path.join(__dirname, '..')
+    });
+    _semanticAvailable = true;
+  } catch {
+    _semanticAvailable = false;
   }
+  return _semanticAvailable;
 }
 
 /**

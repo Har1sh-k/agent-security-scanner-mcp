@@ -20,7 +20,7 @@ export const FIX_TEMPLATES = {
   // ===========================================
   "sql-injection": {
     description: "Use parameterized queries instead of string concatenation",
-    fix: (line) => line.replace(/["']([^"']*)\s*["']\s*\+\s*(\w+)/, '"$1?", [$2]')
+    fix: (line) => '// TODO: manual fix required — use parameterized queries instead of string concatenation\n// ' + line.trim()
   },
   "nosql-injection": {
     description: "Sanitize MongoDB query inputs",
@@ -28,7 +28,7 @@ export const FIX_TEMPLATES = {
   },
   "raw-query": {
     description: "Use parameterized queries instead of raw SQL",
-    fix: (line) => line.replace(/\.query\s*\(\s*["'`]/, '.query("SELECT * FROM table WHERE id = ?", [')
+    fix: (line) => '// TODO: manual fix required — use parameterized queries instead of raw SQL\n// ' + line.trim()
   },
 
   // ===========================================
@@ -306,10 +306,10 @@ export const FIX_TEMPLATES = {
   "path-traversal": {
     description: "Resolve real path and validate prefix to prevent traversal",
     fix: (line, lang) => {
-      if (lang === 'python') return line.replace(/open\s*\(\s*(\w+)/, 'open(os.path.realpath($1)  # TODO: validate path prefix');
-      if (lang === 'go') return line.replace(/os\.Open\s*\(\s*(\w+)/, 'os.Open(filepath.Clean($1)  // TODO: validate path prefix');
-      if (lang === 'java') return line.replace(/new File\s*\(\s*(\w+)/, 'new File($1).getCanonicalFile(  // TODO: validate path prefix');
-      return line.replace(/readFileSync\s*\(\s*(\w+)/, 'readFileSync(path.resolve($1)  // TODO: validate path prefix');
+      if (lang === 'python') return '# TODO: manual fix required — use os.path.realpath() and validate the prefix\n# ' + line.trim();
+      if (lang === 'go') return '// TODO: manual fix required — use filepath.Clean() and validate the prefix\n// ' + line.trim();
+      if (lang === 'java') return '// TODO: manual fix required — use getCanonicalFile() and validate the prefix\n// ' + line.trim();
+      return '// TODO: manual fix required — use path.resolve() and validate the prefix\n// ' + line.trim();
     }
   },
 
@@ -418,7 +418,7 @@ export const FIX_TEMPLATES = {
   // ===========================================
   "xpath-injection": {
     description: "Use parameterized XPath queries",
-    fix: (line) => line.replace(/xpath\s*\(\s*["']([^"']*)\s*["']\s*\+\s*(\w+)/, 'xpath("$1?", [$2]')
+    fix: (line) => '// TODO: manual fix required — use parameterized XPath queries instead of concatenation\n// ' + line.trim()
   },
 
   // ===========================================
@@ -695,9 +695,9 @@ export const FIX_TEMPLATES = {
     description: "CRITICAL: Never eval() LLM responses - use JSON parsing or ast.literal_eval for safe subset",
     fix: (line, lang) => {
       if (lang === 'python') {
-        return line.replace(/eval\s*\(\s*(\w+)/, 'ast.literal_eval($1  # SECURITY: Use safe parsing only');
+        return line.replace(/eval\s*\(\s*(\w+)\s*\)/, 'ast.literal_eval($1)  # SECURITY: Use safe parsing only');
       }
-      return line.replace(/eval\s*\(\s*(\w+)/, 'JSON.parse($1  /* SECURITY: Use safe JSON parsing */');
+      return line.replace(/eval\s*\(\s*(\w+)\s*\)/, 'JSON.parse($1)  /* SECURITY: Use safe JSON parsing */');
     }
   },
   "exec-llm-response": {

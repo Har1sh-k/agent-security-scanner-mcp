@@ -45,6 +45,12 @@ try:
 except ImportError:
     HAS_TAINT_ANALYZER = False
 
+try:
+    from python_taint_fallback import analyze_python_taint
+    HAS_PYTHON_TAINT_FALLBACK = True
+except ImportError:
+    HAS_PYTHON_TAINT_FALLBACK = False
+
 # Semantic analyzer flag (JavaScript-based, optional)
 HAS_SEMANTIC_ANALYZER = True  # Implemented in src/semantic-analyzer.js
 
@@ -106,7 +112,7 @@ def analyze_file_regex(file_path):
     issues = []
     try:
         language = detect_language(file_path)
-        all_rules = get_rules_for_language(language)
+        all_rules = get_rules_for_language(language, file_path)
         # Filter out rules whose paths.include/exclude don't match this file
         rules = {}
         basename = os.path.basename(file_path)
@@ -161,7 +167,22 @@ def analyze_file_regex(file_path):
             issue['engine'] = 'regex-fallback'
         issues.extend(fallback_issues)
     except ImportError:
-        pass
+        source = None
+
+    # Python taint fallback using stdlib ast (no tree-sitter required)
+    if language == 'python' and HAS_PYTHON_TAINT_FALLBACK:
+        try:
+            if source is None:
+                with open(file_path, 'r', errors='replace') as f:
+                    source = f.read()
+            taint_issues = analyze_python_taint(source, file_path)
+            for issue in taint_issues:
+                issue.setdefault('engine', 'taint')
+                issue.get('metadata', {}).setdefault('analysis_mode', 'regex-fallback')
+            issues.extend(taint_issues)
+            print(f"[REGEX] Python taint fallback: {len(taint_issues)} finding(s)", file=sys.stderr)
+        except Exception as e:
+            print(f"[REGEX] Python taint fallback error: {e}", file=sys.stderr)
 
     seen = set()
     unique = []

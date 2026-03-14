@@ -58,10 +58,40 @@ const CONFIDENCE_MULTIPLIERS = {
 // Maximum prompt size to prevent DoS via large inputs (100KB)
 const MAX_PROMPT_SIZE = 100 * 1024;
 
+// Maximum text length fed to any single regex to prevent ReDoS.
+// Prompt-injection patterns look for short markers/phrases, so scanning
+// overlapping 2 KB windows covers all realistic payloads while keeping
+// worst-case regex time bounded.
+const REGEX_SCAN_WINDOW = 2048;
+const REGEX_SCAN_OVERLAP = 256;
+
+/**
+ * Match a regex against text safely — splits long text into overlapping
+ * windows so no single regex call processes more than REGEX_SCAN_WINDOW chars.
+ */
+function safeMatch(text, regex) {
+  if (text.length <= REGEX_SCAN_WINDOW) {
+    return text.match(regex);
+  }
+  for (let offset = 0; offset < text.length; offset += REGEX_SCAN_WINDOW - REGEX_SCAN_OVERLAP) {
+    const chunk = text.slice(offset, offset + REGEX_SCAN_WINDOW);
+    const m = chunk.match(regex);
+    if (m) return m;
+  }
+  return null;
+}
+
 // Rule caches — loaded once per process, not on every call
 let _agentAttackRulesCache = null;
 let _promptInjectionRulesCache = null;
 let _openClawRulesCache = null;
+
+function normalizeYamlRegexPattern(pattern) {
+  return pattern
+    .replace(/^["']|["']$/g, '')
+    .replace(/\(\?i\)/g, '')
+    .replace(/\\\\/g, '\\');
+}
 
 // Load agent attack rules from YAML
 function loadAgentAttackRules() {
@@ -108,11 +138,7 @@ function loadAgentAttackRules() {
           inMetadata = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          // Strip Python-style inline flags - JS doesn't support them
-          pattern = pattern.replace(/^\(\?i\)/, '');
-          // Unescape double backslashes from YAML (\\s -> \s)
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (inMetadata && line.match(/^\s+\w+:/)) {
           const match = line.match(/^\s+(\w+):\s*["']?([^"'\n]+)["']?/);
@@ -182,11 +208,7 @@ function loadPromptInjectionRules() {
           inMetadata = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          // Strip Python-style inline flags - JS doesn't support them
-          pattern = pattern.replace(/^\(\?i\)/, '');
-          // Unescape double backslashes from YAML (\\s -> \s)
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (inMetadata && line.match(/^\s+\w+:/)) {
           const match = line.match(/^\s+(\w+):\s*["']?([^"'\n]+)["']?/);
@@ -253,8 +275,7 @@ function loadOpenClawRules() {
           inPatterns = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeYamlRegexPattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (line.match(/^\s+\w+:/) && !line.match(/^\s+- /)) {
           inPatterns = false;
@@ -579,22 +600,12 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
     }
   }
 
-  // Scan expanded text against all rules
-  // Security: Add timeout protection for regex matching
-  const REGEX_TIMEOUT_MS = 1000;
-
+  // Scan expanded text against all rules using windowed matching to prevent ReDoS
   for (const rule of allRules) {
     for (const pattern of rule.patterns) {
       try {
-        const regex = new RegExp(pattern, 'i');
-        const startTime = Date.now();
-        const match = expandedText.match(regex);
-
-        // Check for regex timeout (ReDoS protection)
-        if (Date.now() - startTime > REGEX_TIMEOUT_MS) {
-          console.warn(`Regex timeout for rule ${rule.id}, skipping`);
-          break;
-        }
+        const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
+        const match = safeMatch(expandedText, regex);
 
         if (match) {
           findings.push({
@@ -617,7 +628,9 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
   }
 
   // 2.8: Runtime base64 decode-and-rescan
-  const base64Regex = /[A-Za-z0-9+/]{40,}={0,2}/g;
+  // Cap base64 match length to avoid matching entire large inputs as one blob.
+  // Real base64 payloads are at most a few KB; 4096 chars ≈ 3KB decoded.
+  const base64Regex = /[A-Za-z0-9+/]{40,4096}={0,2}/g;
   const b64Matches = expandedText.match(base64Regex);
   if (b64Matches) {
     for (const b64str of b64Matches) {
@@ -631,8 +644,8 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
             if (!rule.id.startsWith('generic.prompt')) continue;
             for (const pattern of rule.patterns) {
               try {
-                const regex = new RegExp(pattern, 'i');
-                const match = decoded.match(regex);
+                const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
+                const match = safeMatch(decoded, regex);
                 if (match) {
                   findings.push({
                     rule_id: rule.id + '.base64-decoded',
@@ -674,8 +687,8 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
                   for (const rule of allRules) {
                     for (const pattern of rule.patterns) {
                       try {
-                        const regex = new RegExp(pattern, 'i');
-                        const match = innerDecoded.match(regex);
+                        const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
+                        const match = safeMatch(innerDecoded, regex);
                         if (match) {
                           findings.push({
                             rule_id: rule.id + '.nested-base64-decoded',
@@ -718,7 +731,7 @@ export async function scanAgentPrompt({ prompt_text, context, verbosity }) {
       for (const rule of allRules) {
         for (const pattern of rule.patterns) {
           try {
-            const regex = new RegExp(pattern, 'i');
+            const regex = new RegExp(normalizeYamlRegexPattern(pattern), 'i');
             if (regex.test(prevMsg)) {
               prevTotalScore += parseInt(rule.metadata?.risk_score || '50') / 100;
               msgHasMatch = true;

@@ -126,6 +126,12 @@ function normPath(p) { return IS_WIN ? p.toLowerCase() : p; }
 function pathStartsWith(child, parent) {
   return normPath(child) === normPath(parent) || normPath(child).startsWith(normPath(parent) + sep);
 }
+function normalizeRulePattern(pattern) {
+  return pattern
+    .replace(/^["']|["']$/g, '')
+    .replace(/\(\?i\)/g, '')
+    .replace(/\\\\/g, '\\');
+}
 const MAX_CLAWHAVOC_SCAN_LEN = 2 * 1024 * 1024; // 2 MB cap for regex matching
 
 // ---------------------------------------------------------------------------
@@ -176,9 +182,7 @@ function loadClawHavocRules() {
           inMetadata = true;
         } else if (inPatterns && line.match(/^\s+- /)) {
           let pattern = line.replace(/^\s+- /, '').trim();
-          pattern = pattern.replace(/^["']|["']$/g, '');
-          pattern = pattern.replace(/^\(\?i\)/, '');
-          pattern = pattern.replace(/\\\\/g, '\\');
+          pattern = normalizeRulePattern(pattern);
           if (pattern) rule.patterns.push(pattern);
         } else if (inMetadata && line.match(/^\s+\w+:/)) {
           const match = line.match(/^\s+(\w+):\s*["']?([^"'\n]+)["']?/);
@@ -892,15 +896,44 @@ function generateRecommendation(grade) {
 // ---------------------------------------------------------------------------
 
 export async function scanSkill({ skill_path, verbosity, baseline }) {
-  // Security: Resolve to canonical path FIRST to prevent TOCTOU and symlink attacks
-  const inputPath = skill_path;
-  let realPath;
+  const canonCwd = realpathSync(process.cwd());
+  const configuredSkillRoots = [
+    resolve(homedir(), '.openclaw', 'skills'),
+    resolve(homedir(), '.openclaw', 'workspace', 'skills'),
+  ];
+  const allowedSkillRoots = configuredSkillRoots.map(root => {
+    try {
+      return existsSync(root) ? realpathSync(root) : null;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
 
+  // Reject obvious escapes before touching the filesystem so absolute traversal
+  // attempts fail closed even when the target path does not exist.
+  const inputPath = skill_path;
+  const requestedPath = resolve(inputPath);
+  const isRequestedAllowed = pathStartsWith(requestedPath, canonCwd)
+    || configuredSkillRoots.some(root => pathStartsWith(requestedPath, root))
+    || allowedSkillRoots.some(root => pathStartsWith(requestedPath, root));
+
+  if (!isRequestedAllowed) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        error: "skill_path must be within the current working directory or ~/.openclaw/skills/ (or ~/.openclaw/workspace/skills/)",
+        skill_path: requestedPath,
+        attempted_path: inputPath
+      }) }]
+    };
+  }
+
+  // Resolve to canonical path after the initial boundary check to prevent
+  // symlink escapes while still returning a deterministic security error for
+  // out-of-scope absolute paths.
+  let realPath;
   try {
-    // Resolve to canonical path immediately (defeats symlink attacks)
-    realPath = realpathSync(resolve(inputPath));
+    realPath = realpathSync(requestedPath);
   } catch (err) {
-    // Check for different error types
     let errorMessage;
     if (err.code === 'ENOENT') {
       errorMessage = "Path not found";
@@ -921,20 +954,7 @@ export async function scanSkill({ skill_path, verbosity, baseline }) {
     };
   }
 
-  // Verify containment on canonical path ONLY
-  // This prevents symlink escapes by checking the REAL resolved location
-  const canonCwd = realpathSync(process.cwd());
-  const allowedSkillRoots = [
-    resolve(homedir(), '.openclaw', 'skills'),
-    resolve(homedir(), '.openclaw', 'workspace', 'skills'),
-  ].map(root => {
-    try {
-      return existsSync(root) ? realpathSync(root) : null;
-    } catch {
-      return null;
-    }
-  }).filter(Boolean);
-
+  // Verify containment on canonical path ONLY.
   const isAllowed = pathStartsWith(realPath, canonCwd)
     || allowedSkillRoots.some(root => pathStartsWith(realPath, root));
 

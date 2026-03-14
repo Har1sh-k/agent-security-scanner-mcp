@@ -32,6 +32,17 @@ const BLOOM_FILTERS = {
   rubygems: null
 };
 
+// Flutter/Dart SDK packages are legitimate dependencies even though they do
+// not appear in the pub.dev package dump used for the text-based lookup.
+const DART_SDK_PACKAGES = new Set([
+  'flutter',
+  'flutter_test',
+  'flutter_driver',
+  'flutter_localizations',
+  'flutter_web_plugins',
+  'integration_test',
+]);
+
 // Load package lists on startup
 export function loadPackageLists() {
   const packagesDir = join(__dirname, '..', '..', 'packages');
@@ -67,6 +78,10 @@ export function loadPackageLists() {
 
 // Check if a package is hallucinated
 export function isHallucinated(packageName, ecosystem) {
+  if (ecosystem === 'dart' && DART_SDK_PACKAGES.has(packageName)) {
+    return { hallucinated: false, sdkPackage: true };
+  }
+
   const legitPackages = LEGITIMATE_PACKAGES[ecosystem];
 
   // First check Set-based lookup (exact match)

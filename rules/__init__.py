@@ -201,16 +201,55 @@ def get_rules():
     return rules
 
 
-def get_rules_for_language(language):
-    """Get rules applicable to a specific language"""
+def get_rules_for_language(language, file_path=None):
+    """Get rules applicable to a specific language.
+
+    Generic rules that declare a specific technology in their metadata are
+    only applied when the scanned language or file path indicates that
+    technology is relevant.  This prevents, e.g., Hugo-specific rules from
+    firing on plain JavaScript database code.
+    """
     all_rules = get_rules()
     applicable_rules = {}
 
     language = language.lower()
 
+    # Map technology names to the languages/file-path hints where they apply
+    _TECH_LANGUAGES = {
+        'hugo': {'go', 'html', 'toml', 'yaml'},
+        'django': {'python', 'html'},
+        'rails': {'ruby', 'html', 'erb'},
+        'spring': {'java', 'kotlin'},
+        'laravel': {'php'},
+        'angular': {'typescript', 'javascript', 'html'},
+        'react': {'javascript', 'typescript', 'jsx', 'tsx'},
+    }
+
     for rule_id, rule in all_rules.items():
         rule_languages = [lang.lower() for lang in rule.get('languages', ['generic'])]
-        if language in rule_languages or 'generic' in rule_languages:
+
+        if language in rule_languages:
+            applicable_rules[rule_id] = rule
+            continue
+
+        if 'generic' in rule_languages:
+            # Check if this generic rule is scoped to a specific technology
+            techs = rule.get('metadata', {}).get('technology')
+            if techs and isinstance(techs, list):
+                # Only apply if the current language is relevant to the technology
+                tech_relevant = False
+                for tech in techs:
+                    tech_lower = tech.lower()
+                    allowed = _TECH_LANGUAGES.get(tech_lower)
+                    if allowed and language in allowed:
+                        tech_relevant = True
+                        break
+                    # Also check if the technology name appears in the file path
+                    if file_path and tech_lower in file_path.lower():
+                        tech_relevant = True
+                        break
+                if not tech_relevant:
+                    continue
             applicable_rules[rule_id] = rule
 
     return applicable_rules

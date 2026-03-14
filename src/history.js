@@ -49,7 +49,7 @@ export function saveResult(dirPath, scanResult) {
   };
 
   writeFileSync(filePath, JSON.stringify(historyEntry, null, 2) + '\n');
-  return filePath;
+  return filePath.replace(/\\/g, '/');
 }
 
 /**
