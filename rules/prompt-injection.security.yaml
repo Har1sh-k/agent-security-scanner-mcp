@@ -672,8 +672,8 @@ rules:
     severity: WARNING
     message: "Potential Base64-encoded prompt injection payload. Encoded content may hide malicious instructions."
     patterns:
-      - "(?i)decode\\s+(this\\s+)?base64\\s*:\\s*[A-Za-z0-9+/=]{20,}"
-      - "(?i)base64\\s*:\\s*[A-Za-z0-9+/=]{40,}"
+      - "(?i)decode\\s+(this\\s+)?base64\\s*:\\s*[A-Za-z0-9+/=]{20,200}"
+      - "(?i)base64\\s*:\\s*[A-Za-z0-9+/=]{40,200}"
       - "aWdub3JlIHByZXZpb3Vz"
       - "c3lzdGVtIHByb21wdA=="
       - "(?i)execute\\s+(this\\s+)?encoded"
@@ -682,8 +682,8 @@ rules:
       - "aWdub3JlIGFsbC"
       - "b3ZlcnJpZGU="
       - "(?i)base64.{0,20}instructions?.{0,20}follow"
-      - "[A-Za-z0-9+/]{40,}={0,2}\\s*.{0,20}(?i)(decode|execute|follow|run)"
-      - "(?i)(decode|run|execute)\\s+.{0,20}[A-Za-z0-9+/]{40,}={0,2}"
+      - "[A-Za-z0-9+/]{40,200}={0,2}[^A-Za-z0-9+/=].{0,20}(?:decode|execute|follow|run)"
+      - "(?i)(decode|run|execute)\\s+.{0,20}[A-Za-z0-9+/]{40,200}={0,2}"
     metadata:
       cwe: "CWE-77"
       owasp: "LLM01 - Prompt Injection"
