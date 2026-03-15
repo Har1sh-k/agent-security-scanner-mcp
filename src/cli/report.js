@@ -445,6 +445,11 @@ export async function runReport(args) {
   });
   const scanResult = JSON.parse(result.content[0].text);
 
+  // Attach threat model before saving to history so future trends include AIVSS posture
+  if (threatModel) {
+    scanResult.threat_model = buildThreatModel(scanResult);
+  }
+
   // Save result to history
   const savedPath = saveResult(dirPath, scanResult);
   console.log(`  Results saved to ${savedPath}`);
@@ -468,11 +473,6 @@ export async function runReport(args) {
       diff,
       generated_at: new Date().toISOString(),
     };
-
-    // Threat model extension
-    if (threatModel) {
-      jsonReport.threat_model = buildThreatModel(scanResult);
-    }
 
     console.log(JSON.stringify(jsonReport, null, 2));
     return;
