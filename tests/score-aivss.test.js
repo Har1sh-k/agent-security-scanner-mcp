@@ -40,6 +40,40 @@ describe('computeAivss', () => {
     expect(score).toBeLessThanOrEqual(10);
   });
 
+  it('golden vector: all-High metrics produce expected score', () => {
+    // Manual calculation:
+    // Base = min(0.85 × 0.77 × 0.85 × 0.85 × 1.0, 10) = 0.4727
+    // AI   = 0.8^5 × 10 = 3.2768
+    // Impact = (0.85 × 4) / 4 × 10 = 8.5
+    // AIVSS = 0.25×0.4727 + 0.45×3.2768 + 0.30×8.5 = 4.14
+    const metrics = {
+      AV: 'Network', AC: 'Low', PR: 'None', UI: 'None', S: 'Unchanged',
+      MR: 'High', DS: 'High', EI: 'High', DC: 'High', AD: 'High',
+      C: 'High', I: 'High', A: 'High', SI: 'High',
+    };
+    const { score } = computeAivss(metrics);
+    expect(score).toBeCloseTo(4.14, 1);
+  });
+
+  it('golden vector: worst-case reachable metrics', () => {
+    // Base = min(0.85×0.77×0.85×0.85×1.5, 10) = 0.7091
+    // AI   = 1^5 × 10 = 10
+    // Impact = (1.0 × 4) / 4 × 10 = 10
+    // AIVSS = 0.25×0.7091 + 0.45×10 + 0.30×10 = 7.68
+    const metrics = {
+      AV: 'Network', AC: 'Low', PR: 'None', UI: 'None', S: 'Changed',
+      MR: 'VeryHigh', DS: 'VeryHigh', EI: 'VeryHigh', DC: 'VeryHigh', AD: 'VeryHigh',
+      C: 'Critical', I: 'Critical', A: 'Critical', SI: 'Critical',
+    };
+    const { score } = computeAivss(metrics);
+    expect(score).toBeCloseTo(7.68, 1);
+  });
+
+  it('source_ref is pinned to an immutable commit', () => {
+    expect(AIVSS_MODEL.source_ref).not.toContain('@main');
+    expect(AIVSS_MODEL.source_ref).toMatch(/@[a-f0-9]+\//);
+  });
+
   it('never returns < 0', () => {
     const metrics = {
       AV: 'Physical', AC: 'High', PR: 'High', UI: 'Required', S: 'Unchanged',

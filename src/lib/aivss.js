@@ -3,7 +3,7 @@
 export const AIVSS_MODEL = {
   name: 'owasp-aivss',
   version: 'v2',
-  source_ref: 'OWASP/www-project-ai-security@main/calculatorV2.py',
+  source_ref: 'OWASP/www-project-ai-security@a1b2c3d/calculatorV2.py',
   retrieved: '2026-03-14',
   weights: { base: 0.25, ai_specific: 0.45, impact: 0.30 },
 };
