@@ -368,14 +368,20 @@ function generateHtml(scanResult, history, diff) {
  * Exported for testing.
  */
 export function buildThreatModel(scanResult) {
-  const normalized = normalizeFindings(scanResult.issues || [], 'scan_project');
-  const aivssResult = scoreBatch(normalized);
+  // scan_project wraps scan_security — tag findings as scan_security so
+  // controls scoped to either tool can see them. Duplicate each finding
+  // under both source_tools for correct evaluator scoping.
+  const base = normalizeFindings(scanResult.issues || [], 'scan_security');
+  const duped = base.map(f => ({ ...f, source_tool: 'scan_project' }));
+  const normalized = [...base, ...duped];
+  const aivssResult = scoreBatch(base); // score deduplicated set
 
+  const grade = scanResult.grade || null;
   const controls = loadControls().controls;
   const evidence = {
     aivssPosture: aivssResult.posture,
     findings: normalized,
-    grades: { scan_project: scanResult.grade || null, project: scanResult.grade || null },
+    grades: { scan_project: grade, scan_security: grade, project: grade },
     toolsRun: ['scan_project', 'scan_security'],
   };
   const complianceResult = evaluateAll(controls, evidence);

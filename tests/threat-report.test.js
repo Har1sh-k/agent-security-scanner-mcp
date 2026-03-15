@@ -152,6 +152,18 @@ describe('threat-model report integration', () => {
     expect(tm.aivss.findings).toHaveLength(0);
   });
 
+  it('buildThreatModel: scan_security-scoped controls see findings and grade', () => {
+    const tm = buildThreatModel(scanProjectOutput);
+    // B004 requires scan_security — should NOT get "No relevant grade"
+    const b004 = tm.compliance.results.find(r => r.control_id === 'B004');
+    expect(b004).toBeTruthy();
+    expect(b004.reasons.every(r => !r.includes('No relevant grade'))).toBe(true);
+    // B003 also requires scan_security
+    const b003 = tm.compliance.results.find(r => r.control_id === 'B003');
+    expect(b003).toBeTruthy();
+    expect(b003.reasons.every(r => !r.includes('No relevant grade'))).toBe(true);
+  });
+
   it('compliance evaluation correctly marks not_evaluated controls', () => {
     const normalized = normalizeFindings(scanProjectOutput.issues, 'scan_project');
     const aivssResult = scoreBatch(normalized);
