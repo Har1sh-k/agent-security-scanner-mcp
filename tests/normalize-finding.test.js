@@ -200,6 +200,40 @@ describe('normalizeFinding', () => {
     expect(result.severity).toBe('HIGH');
   });
 
+  // --- category inference from ruleId ---
+  it('infers category from ruleId when no explicit category', () => {
+    const sqlInj = normalizeFinding({
+      ruleId: 'python.injection.sql-injection',
+      severity: 'error',
+      message: 'SQL injection',
+    }, 'scan_security');
+    expect(sqlInj.category).toBe('injection');
+
+    const crypto = normalizeFinding({
+      ruleId: 'python.crypto.weak-hash',
+      severity: 'warning',
+      message: 'Weak hash',
+    }, 'scan_security');
+    expect(crypto.category).toBe('crypto');
+
+    const info = normalizeFinding({
+      ruleId: 'python.info.debug-enabled',
+      severity: 'info',
+      message: 'Debug mode',
+    }, 'scan_security');
+    expect(info.category).toBe('info-exposure');
+  });
+
+  it('explicit category wins over inferred', () => {
+    const result = normalizeFinding({
+      ruleId: 'python.injection.sql-injection',
+      severity: 'error',
+      message: 'test',
+      category: 'custom-category',
+    }, 'scan_security');
+    expect(result.category).toBe('custom-category');
+  });
+
   // --- null/invalid input ---
   it('returns null for null or non-object input', () => {
     expect(normalizeFinding(null, 'test')).toBeNull();

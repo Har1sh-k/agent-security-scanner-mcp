@@ -19,11 +19,51 @@ const SEVERITY_MAP = {
 
 const DEFAULT_SEVERITY = { severity: 'MEDIUM', severity_rank: 2 };
 
+// Map ruleId segments to categories for tools that don't emit category directly.
+// Keyed by the second dotted segment of ruleId (e.g. "injection" from "python.injection.sql-injection").
+const RULE_CATEGORY_MAP = {
+  'injection': 'injection',
+  'crypto': 'crypto',
+  'auth': 'auth',
+  'xss': 'xss',
+  'ssrf': 'ssrf',
+  'path': 'path-traversal',
+  'deserialization': 'deserialization',
+  'info': 'info-exposure',
+  'permissions': 'permissions',
+  'logging': 'info-exposure',
+  'secrets': 'info-exposure',
+  'prompt': 'prompt-injection',
+  'exfiltration': 'exfiltration',
+  'supply': 'supply-chain',
+  'command': 'injection',
+  'sql': 'injection',
+};
+
 /**
  * Extract a unified rule_id from any finding shape.
  */
 function extractRuleId(finding) {
   return finding.ruleId || finding.rule_id || finding.id || finding.rule || null;
+}
+
+/**
+ * Infer category from ruleId when no explicit category is set.
+ * Looks at dotted segments of the ruleId for known category keywords.
+ */
+function inferCategory(ruleId) {
+  if (!ruleId) return null;
+  const segments = ruleId.toLowerCase().split('.');
+  for (const seg of segments) {
+    if (RULE_CATEGORY_MAP[seg]) return RULE_CATEGORY_MAP[seg];
+  }
+  // Check if any segment contains a known keyword
+  for (const seg of segments) {
+    for (const [key, cat] of Object.entries(RULE_CATEGORY_MAP)) {
+      if (seg.includes(key)) return cat;
+    }
+  }
+  return null;
 }
 
 /**
@@ -71,7 +111,7 @@ export function normalizeFinding(finding, sourceTool, options = {}) {
     severity_rank: mapped.severity_rank,
     confidence: normalizeConfidence(finding.confidence),
     message: finding.message || '',
-    category: finding.category || null,
+    category: finding.category || inferCategory(extractRuleId(finding)),
     cwe: finding.cwe || (finding.metadata && finding.metadata.cwe) || null,
     owasp: finding.owasp || (finding.metadata && finding.metadata.owasp) || null,
     file: finding.file || null,
