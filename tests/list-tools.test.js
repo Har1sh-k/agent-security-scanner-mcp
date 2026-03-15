@@ -40,4 +40,16 @@ describe('MCP server tools', () => {
     const toolNames = tools.map(t => t.name);
     expect(toolNames).toContain('list_package_stats');
   });
+
+  it('should have score_aivss tool', async () => {
+    const tools = await client.listTools();
+    const toolNames = tools.map(t => t.name);
+    expect(toolNames).toContain('score_aivss');
+  });
+
+  it('should have get_compliance_controls tool', async () => {
+    const tools = await client.listTools();
+    const toolNames = tools.map(t => t.name);
+    expect(toolNames).toContain('get_compliance_controls');
+  });
 });
