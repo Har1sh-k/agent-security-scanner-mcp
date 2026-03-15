@@ -1,5 +1,7 @@
 // src/lib/compliance-evaluator.js — Deterministic pass/partial/fail evaluation logic.
 
+import { scoreBatch } from './aivss.js';
+
 const GRADE_ORDER = { A: 4, B: 3, C: 2, D: 1, F: 0 };
 
 /**
@@ -78,11 +80,12 @@ export function evaluateControl(control, evidence) {
     }
   }
 
-  // 4. Check max_aivss_posture
-  if (typeof ev.max_aivss_posture === 'number' && evidence.aivssPosture) {
-    if (evidence.aivssPosture.posture_score > ev.max_aivss_posture) {
+  // 4. Check max_aivss_posture (scoped to this control's relevant findings)
+  if (typeof ev.max_aivss_posture === 'number' && relevantFindings.length > 0) {
+    const scopedPosture = scoreBatch(relevantFindings).posture;
+    if (scopedPosture.posture_score > ev.max_aivss_posture) {
       status = 'fail';
-      reasons.push(`AIVSS posture ${evidence.aivssPosture.posture_score} exceeds max ${ev.max_aivss_posture}`);
+      reasons.push(`AIVSS posture ${scopedPosture.posture_score} exceeds max ${ev.max_aivss_posture}`);
     }
   }
 

@@ -174,25 +174,48 @@ describe('compliance-evaluator', () => {
     expect(result.reasons.some(r => r.includes('BLOCK'))).toBe(true);
   });
 
-  it('fail on high AIVSS posture', () => {
+  it('fail on high AIVSS posture from relevant findings', () => {
     const control = {
       id: 'B004', title: 'Test',
       domain: 'security',
       scanner_tools: ['scan_security'],
       evaluation: {
-        max_aivss_posture: 5.0,
+        max_aivss_posture: 1.0,
         required_tools: ['scan_security'],
       },
     };
     const evidence = {
-      aivssPosture: { posture_score: 8.5 },
-      findings: [],
+      findings: [
+        { severity: 'HIGH', severity_rank: 3, confidence: 'HIGH', category: 'injection', source_tool: 'scan_security', rule_id: 'r1', message: 'test' },
+      ],
       grades: {},
       toolsRun: ['scan_security'],
     };
     const result = evaluateControl(control, evidence);
     expect(result.status).toBe('fail');
     expect(result.reasons.some(r => r.includes('AIVSS posture'))).toBe(true);
+  });
+
+  it('AIVSS posture from unrelated tool does not fail control', () => {
+    const control = {
+      id: 'B004', title: 'Test',
+      domain: 'security',
+      scanner_tools: ['scan_security'],
+      evaluation: {
+        max_aivss_posture: 1.0,
+        required_tools: ['scan_security'],
+      },
+    };
+    const evidence = {
+      findings: [
+        { severity: 'HIGH', severity_rank: 3, confidence: 'HIGH', category: 'injection', source_tool: 'scan_skill', rule_id: 'unrelated', message: 'test' },
+      ],
+      grades: {},
+      toolsRun: ['scan_security'],
+    };
+    const result = evaluateControl(control, evidence);
+    // No relevant findings → posture not computed → should not fail
+    expect(result.status).toBe('pass');
   });
 
   it('partial on bad grade (grade ordering: A > B > C > D > F)', () => {
