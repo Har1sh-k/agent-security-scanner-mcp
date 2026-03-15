@@ -364,6 +364,56 @@ function generateHtml(scanResult, history, diff) {
 }
 
 /**
+ * Build the threat_model section from scan results.
+ * Exported for testing.
+ */
+export function buildThreatModel(scanResult) {
+  const normalized = normalizeFindings(scanResult.issues || [], 'scan_project');
+  const aivssResult = scoreBatch(normalized);
+
+  const controls = loadControls().controls;
+  const evidence = {
+    aivssPosture: aivssResult.posture,
+    findings: normalized,
+    grades: { scan_project: scanResult.grade || null, project: scanResult.grade || null },
+    toolsRun: ['scan_project', 'scan_security'],
+  };
+  const complianceResult = evaluateAll(controls, evidence);
+
+  return {
+    aivss: {
+      model: aivssResult.posture.model,
+      posture: {
+        max_score: aivssResult.posture.max_score,
+        p95_score: aivssResult.posture.p95_score,
+        mean_score: aivssResult.posture.mean_score,
+        posture_score: aivssResult.posture.posture_score,
+        posture_rating: aivssResult.posture.posture_rating,
+        score_distribution: aivssResult.posture.score_distribution,
+      },
+      findings: aivssResult.findings.map(f => ({
+        rule_id: f.rule_id,
+        aivss_score: f.aivss_score,
+        rating: f.rating,
+        vector_string: f.vector_string,
+        metrics: f.metrics,
+      })),
+    },
+    compliance: {
+      framework: 'AIUC-1',
+      controls_evaluated: complianceResult.controls_evaluated,
+      summary: {
+        pass: complianceResult.pass,
+        partial: complianceResult.partial,
+        fail: complianceResult.fail,
+        not_evaluated: complianceResult.not_evaluated,
+      },
+      results: complianceResult.results,
+    },
+  };
+}
+
+/**
  * Run the report CLI command.
  *
  * @param {string[]} args - CLI arguments: <directory> [--json] [--days N]
@@ -421,49 +471,7 @@ export async function runReport(args) {
 
     // Threat model extension
     if (threatModel) {
-      const normalized = normalizeFindings(scanResult.issues || [], 'scan_project');
-      const aivssResult = scoreBatch(normalized);
-
-      const controls = loadControls().controls;
-      const evidence = {
-        aivssPosture: aivssResult.posture,
-        findings: normalized,
-        grades: { scan_project: scanResult.grade || null, project: scanResult.grade || null },
-        toolsRun: ['scan_project', 'scan_security'],
-      };
-      const complianceResult = evaluateAll(controls, evidence);
-
-      jsonReport.threat_model = {
-        aivss: {
-          model: aivssResult.posture.model,
-          posture: {
-            max_score: aivssResult.posture.max_score,
-            p95_score: aivssResult.posture.p95_score,
-            mean_score: aivssResult.posture.mean_score,
-            posture_score: aivssResult.posture.posture_score,
-            posture_rating: aivssResult.posture.posture_rating,
-            score_distribution: aivssResult.posture.score_distribution,
-          },
-          findings: aivssResult.findings.map(f => ({
-            rule_id: f.rule_id,
-            aivss_score: f.aivss_score,
-            rating: f.rating,
-            vector_string: f.vector_string,
-            metrics: f.metrics,
-          })),
-        },
-        compliance: {
-          framework: 'AIUC-1',
-          controls_evaluated: complianceResult.controls_evaluated,
-          summary: {
-            pass: complianceResult.pass,
-            partial: complianceResult.partial,
-            fail: complianceResult.fail,
-            not_evaluated: complianceResult.not_evaluated,
-          },
-          results: complianceResult.results,
-        },
-      };
+      jsonReport.threat_model = buildThreatModel(scanResult);
     }
 
     console.log(JSON.stringify(jsonReport, null, 2));

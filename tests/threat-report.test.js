@@ -3,6 +3,7 @@ import { normalizeFindings } from '../src/lib/normalize-finding.js';
 import { scoreBatch } from '../src/lib/aivss.js';
 import { loadControls } from '../src/lib/compliance-controls.js';
 import { evaluateAll } from '../src/lib/compliance-evaluator.js';
+import { buildThreatModel } from '../src/cli/report.js';
 import scanProjectOutput from './fixtures/scan-project-output.json' with { type: 'json' };
 import scanPromptOutput from './fixtures/scan-prompt-output.json' with { type: 'json' };
 import scanSkillOutput from './fixtures/scan-skill-output.json' with { type: 'json' };
@@ -108,6 +109,47 @@ describe('threat-model report integration', () => {
     expect(output.framework).toBe('AIUC-1');
     expect(output.controls_count).toBe(9); // 9 security controls
     expect(output.controls[0]).toHaveProperty('evaluation');
+  });
+
+  it('buildThreatModel produces correct JSON shape from scan_project output', () => {
+    const tm = buildThreatModel(scanProjectOutput);
+
+    // AIVSS section
+    expect(tm.aivss).toBeTruthy();
+    expect(tm.aivss.model.name).toBe('owasp-aivss');
+    expect(tm.aivss.posture.posture_score).toBeGreaterThanOrEqual(0);
+    expect(tm.aivss.posture.posture_score).toBeLessThanOrEqual(10);
+    expect(tm.aivss.posture).toHaveProperty('max_score');
+    expect(tm.aivss.posture).toHaveProperty('p95_score');
+    expect(tm.aivss.posture).toHaveProperty('mean_score');
+    expect(tm.aivss.posture).toHaveProperty('score_distribution');
+    expect(tm.aivss.findings).toHaveLength(4);
+    for (const f of tm.aivss.findings) {
+      expect(f).toHaveProperty('rule_id');
+      expect(f).toHaveProperty('aivss_score');
+      expect(f).toHaveProperty('rating');
+      expect(f).toHaveProperty('vector_string');
+      expect(f).toHaveProperty('metrics');
+    }
+
+    // Compliance section
+    expect(tm.compliance).toBeTruthy();
+    expect(tm.compliance.framework).toBe('AIUC-1');
+    expect(tm.compliance.controls_evaluated).toBe(16);
+    expect(tm.compliance.summary).toHaveProperty('pass');
+    expect(tm.compliance.summary).toHaveProperty('partial');
+    expect(tm.compliance.summary).toHaveProperty('fail');
+    expect(tm.compliance.summary).toHaveProperty('not_evaluated');
+    const total = tm.compliance.summary.pass + tm.compliance.summary.partial
+      + tm.compliance.summary.fail + tm.compliance.summary.not_evaluated;
+    expect(total).toBe(16);
+    expect(tm.compliance.results).toHaveLength(16);
+  });
+
+  it('buildThreatModel with empty issues produces posture 0', () => {
+    const tm = buildThreatModel({ issues: [], grade: 'A' });
+    expect(tm.aivss.posture.posture_score).toBe(0);
+    expect(tm.aivss.findings).toHaveLength(0);
   });
 
   it('compliance evaluation correctly marks not_evaluated controls', () => {
