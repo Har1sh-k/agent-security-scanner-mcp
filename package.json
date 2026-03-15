@@ -1,6 +1,6 @@
 {
   "name": "agent-security-scanner-mcp",
-  "version": "3.19.0",
+  "version": "3.20.0",
   "mcpName": "io.github.sinewaveai/agent-security-scanner-mcp",
   "description": "Security scanner MCP server for AI coding agents. Prompt injection firewall, package hallucination detection (4.3M+ packages), 1000+ vulnerability rules with AST & taint analysis, auto-fix. For Claude Code, Cursor, Windsurf, Cline, OpenClaw.",
   "main": "index.js",
@@ -110,7 +110,9 @@
     "scripts/postinstall.js",
     "cross_file_analyzer.py",
     "daemon.py",
-    "python_taint_fallback.py"
+    "python_taint_fallback.py",
+    "src/lib/*.js",
+    "compliance/**"
   ],
   "devDependencies": {
     "all-the-package-names": "^2.0.2349",
