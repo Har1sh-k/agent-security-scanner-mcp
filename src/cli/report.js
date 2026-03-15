@@ -428,7 +428,7 @@ export async function runReport(args) {
       const evidence = {
         aivssPosture: aivssResult.posture,
         findings: normalized,
-        grades: { project: scanResult.grade || null },
+        grades: { scan_project: scanResult.grade || null, project: scanResult.grade || null },
         toolsRun: ['scan_project', 'scan_security'],
       };
       const complianceResult = evaluateAll(controls, evidence);

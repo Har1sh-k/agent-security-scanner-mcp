@@ -51,13 +51,16 @@ export function evaluateControl(control, evidence) {
 
   let status = 'pass';
 
+  // Scope findings to this control's relevant tools
+  const relevantTools = Array.isArray(control.scanner_tools) ? new Set(control.scanner_tools) : null;
+  const relevantFindings = (evidence.findings || []).filter(f => {
+    if (!relevantTools) return true;
+    return relevantTools.has(f.source_tool);
+  });
+
   // 2. Check fail_on_severities
   if (Array.isArray(ev.fail_on_severities) && ev.fail_on_severities.length > 0) {
     const sevSet = new Set(ev.fail_on_severities);
-    const relevantFindings = (evidence.findings || []).filter(f => {
-      if (!Array.isArray(control.scanner_tools)) return true;
-      return control.scanner_tools.includes(f.source_tool);
-    });
     const matched = relevantFindings.filter(f => sevSet.has(f.severity));
     if (matched.length > 0) {
       status = 'fail';
@@ -68,10 +71,6 @@ export function evaluateControl(control, evidence) {
   // 3. Check fail_on_actions
   if (Array.isArray(ev.fail_on_actions) && ev.fail_on_actions.length > 0) {
     const actSet = new Set(ev.fail_on_actions);
-    const relevantFindings = (evidence.findings || []).filter(f => {
-      if (!Array.isArray(control.scanner_tools)) return true;
-      return control.scanner_tools.includes(f.source_tool);
-    });
     const matched = relevantFindings.filter(f => f.action && actSet.has(f.action));
     if (matched.length > 0) {
       status = 'fail';
@@ -87,21 +86,23 @@ export function evaluateControl(control, evidence) {
     }
   }
 
-  // 5. Check max_critical_findings
+  // 5. Check max_critical_findings (scoped to this control's tools)
   if (typeof ev.max_critical_findings === 'number') {
-    const critCount = (evidence.findings || []).filter(f => f.severity === 'CRITICAL').length;
+    const critCount = relevantFindings.filter(f => f.severity === 'CRITICAL').length;
     if (critCount > ev.max_critical_findings) {
       status = 'fail';
       reasons.push(`${critCount} CRITICAL finding(s) exceeds max ${ev.max_critical_findings}`);
     }
   }
 
-  // 6. Check min_grade (partial if grade is worse)
+  // 6. Check min_grade (scoped to control's relevant grade keys)
   if (ev.min_grade) {
-    // Find the best applicable grade from evidence
     const grades = evidence.grades || {};
-    // Check all grade keys — use the first relevant one
-    const gradeValues = Object.values(grades);
+    // Only consider grades for tools this control cares about
+    const relevantGradeKeys = relevantTools
+      ? Object.keys(grades).filter(k => relevantTools.has(k) || relevantTools.has(`scan_${k}`))
+      : Object.keys(grades);
+    const gradeValues = relevantGradeKeys.map(k => grades[k]);
     if (gradeValues.length > 0) {
       const worstGrade = gradeValues.reduce((worst, g) => {
         return gradeIsWorse(g, worst) ? g : worst;
@@ -111,10 +112,10 @@ export function evaluateControl(control, evidence) {
         reasons.push(`Grade ${worstGrade || 'F'} below minimum ${ev.min_grade}`);
       }
     } else if (status !== 'fail') {
-      // No grades available → treat as F
+      // No relevant grades available → treat as F
       if (gradeIsWorse(null, ev.min_grade)) {
         status = 'partial';
-        reasons.push(`No grade available (treated as F), below minimum ${ev.min_grade}`);
+        reasons.push(`No relevant grade available (treated as F), below minimum ${ev.min_grade}`);
       }
     }
   }

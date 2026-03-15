@@ -112,7 +112,7 @@ describe('compliance-evaluator', () => {
     const evidence = {
       aivssPosture: { posture_score: 2.0 },
       findings: [],
-      grades: { project: 'A' },
+      grades: { scan_security: 'A' },
       toolsRun: ['scan_security'],
     };
     const result = evaluateControl(control, evidence);
@@ -194,7 +194,7 @@ describe('compliance-evaluator', () => {
     };
     const evidence = {
       findings: [],
-      grades: { project: 'D' },
+      grades: { scan_security: 'D' },
       toolsRun: ['scan_security'],
     };
     const result = evaluateControl(control, evidence);
@@ -245,6 +245,47 @@ describe('compliance-evaluator', () => {
     const result = evaluateControl({}, { findings: [], grades: {}, toolsRun: [] });
     expect(result.status).toBe('not_evaluated');
     expect(result.reasons.some(r => r.includes('Malformed'))).toBe(true);
+  });
+
+  it('CRITICAL finding from unrelated tool does not fail control', () => {
+    const control = {
+      id: 'B001', title: 'Test',
+      domain: 'security',
+      scanner_tools: ['scan_agent_prompt'],
+      evaluation: {
+        fail_on_severities: ['CRITICAL'],
+        required_tools: ['scan_agent_prompt'],
+        max_critical_findings: 0,
+      },
+    };
+    const evidence = {
+      findings: [
+        { severity: 'CRITICAL', source_tool: 'scan_skill', rule_id: 'unrelated' },
+      ],
+      grades: {},
+      toolsRun: ['scan_agent_prompt'],
+    };
+    const result = evaluateControl(control, evidence);
+    expect(result.status).toBe('pass');
+  });
+
+  it('grade from unrelated scope does not trigger partial', () => {
+    const control = {
+      id: 'B007', title: 'Test',
+      domain: 'security',
+      scanner_tools: ['scan_security'],
+      evaluation: {
+        required_tools: ['scan_security'],
+        min_grade: 'C',
+      },
+    };
+    const evidence = {
+      findings: [],
+      grades: { scan_security: 'A', scan_skill: 'F' },
+      toolsRun: ['scan_security'],
+    };
+    const result = evaluateControl(control, evidence);
+    expect(result.status).toBe('pass');
   });
 
   it('unknown overrides in evaluation object ignored without crash', () => {
