@@ -26,6 +26,8 @@ import { runDoctor } from './src/cli/doctor.js';
 import { runDemo } from './src/cli/demo.js';
 import { runInitHooks } from './src/cli/init-hooks.js';
 import { runReport } from './src/cli/report.js';
+import { scoreAivssSchema, scoreAivssTool } from './src/tools/score-aivss.js';
+import { complianceControlsSchema, getComplianceControls } from './src/tools/compliance-controls.js';
 
 // Handle both ESM and CJS bundling (Smithery bundles to CJS)
 let __dirname;
@@ -230,6 +232,24 @@ server.tool(
   "Alias for scanner_health (deprecated, use scanner_health instead)",
   {},
   _healthHandler
+);
+
+// ===========================================
+// AIVSS SCORING + COMPLIANCE
+// ===========================================
+
+server.tool(
+  "score_aivss",
+  "Score findings using OWASP AIVSS v2. Accepts any scanner output or raw findings JSON. Returns per-finding AIVSS scores (0-10) and aggregate posture. Use verbosity='minimal' for posture only, 'compact' (default) for scores, 'full' for all metrics.",
+  scoreAivssSchema,
+  scoreAivssTool
+);
+
+server.tool(
+  "get_compliance_controls",
+  "Look up AIUC-1 compliance controls with evaluation criteria. Filter by domain (security/safety), control IDs, or OWASP LLM tags. Returns structured evaluation rules for pass/partial/fail assessment.",
+  complianceControlsSchema,
+  getComplianceControls
 );
 
 // ===========================================
@@ -515,7 +535,7 @@ const cliArgs = process.argv.slice(2);
   console.log('    init-hooks           Install Claude Code hooks for auto-scanning');
   console.log('    doctor [--fix]       Check environment & client configs');
   console.log('    demo [--lang js]     Generate vulnerable file + scan it');
-  console.log('    report <dir>         Generate HTML security report with history');
+  console.log('    report <dir>         Generate HTML security report with history [--threat-model]');
   console.log('    benchmark [flags]      Run accuracy benchmarks\n');
   console.log('  CLI Tools (for scripts & OpenClaw):');
   console.log('    scan-prompt <text>   Scan prompt for injection attacks');

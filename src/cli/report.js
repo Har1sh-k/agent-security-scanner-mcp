@@ -4,6 +4,10 @@ import { existsSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { scanProject } from '../tools/scan-project.js';
 import { saveResult, loadHistory, getTrends, diffResults } from '../history.js';
+import { normalizeFindings } from '../lib/normalize-finding.js';
+import { scoreBatch } from '../lib/aivss.js';
+import { loadControls } from '../lib/compliance-controls.js';
+import { evaluateAll } from '../lib/compliance-evaluator.js';
 
 // Grade color mapping
 const GRADE_COLORS = {
@@ -378,6 +382,7 @@ export async function runReport(args) {
   }
 
   const jsonOutput = args.includes('--json');
+  const threatModel = args.includes('--threat-model');
   const daysIdx = args.indexOf('--days');
   const days = daysIdx !== -1 && args[daysIdx + 1] ? parseInt(args[daysIdx + 1], 10) : 90;
 
@@ -413,6 +418,54 @@ export async function runReport(args) {
       diff,
       generated_at: new Date().toISOString(),
     };
+
+    // Threat model extension
+    if (threatModel) {
+      const normalized = normalizeFindings(scanResult.issues || [], 'scan_project');
+      const aivssResult = scoreBatch(normalized);
+
+      const controls = loadControls().controls;
+      const evidence = {
+        aivssPosture: aivssResult.posture,
+        findings: normalized,
+        grades: { project: scanResult.grade || null },
+        toolsRun: ['scan_project', 'scan_security'],
+      };
+      const complianceResult = evaluateAll(controls, evidence);
+
+      jsonReport.threat_model = {
+        aivss: {
+          model: aivssResult.posture.model,
+          posture: {
+            max_score: aivssResult.posture.max_score,
+            p95_score: aivssResult.posture.p95_score,
+            mean_score: aivssResult.posture.mean_score,
+            posture_score: aivssResult.posture.posture_score,
+            posture_rating: aivssResult.posture.posture_rating,
+            score_distribution: aivssResult.posture.score_distribution,
+          },
+          findings: aivssResult.findings.map(f => ({
+            rule_id: f.rule_id,
+            aivss_score: f.aivss_score,
+            rating: f.rating,
+            vector_string: f.vector_string,
+            metrics: f.metrics,
+          })),
+        },
+        compliance: {
+          framework: 'AIUC-1',
+          controls_evaluated: complianceResult.controls_evaluated,
+          summary: {
+            pass: complianceResult.pass,
+            partial: complianceResult.partial,
+            fail: complianceResult.fail,
+            not_evaluated: complianceResult.not_evaluated,
+          },
+          results: complianceResult.results,
+        },
+      };
+    }
+
     console.log(JSON.stringify(jsonReport, null, 2));
     return;
   }
