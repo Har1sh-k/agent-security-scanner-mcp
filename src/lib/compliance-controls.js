@@ -82,8 +82,25 @@ export function validateRegistry(data) {
       if (ev.max_critical_findings !== undefined && typeof ev.max_critical_findings !== 'number') {
         errors.push(`Control ${ctrl.id}: evaluation.max_critical_findings must be a number`);
       }
-      if (ev.required_tools !== undefined && !Array.isArray(ev.required_tools)) {
-        errors.push(`Control ${ctrl.id}: evaluation.required_tools must be an array`);
+      if (ev.required_tools !== undefined) {
+        if (!Array.isArray(ev.required_tools)) {
+          errors.push(`Control ${ctrl.id}: evaluation.required_tools must be an array`);
+        } else {
+          for (const tool of ev.required_tools) {
+            if (!KNOWN_TOOLS.has(tool)) {
+              errors.push(`Control ${ctrl.id}: evaluation.required_tools references unknown tool "${tool}"`);
+            }
+          }
+        }
+      }
+      if (ev.fail_on_severities !== undefined && !Array.isArray(ev.fail_on_severities)) {
+        errors.push(`Control ${ctrl.id}: evaluation.fail_on_severities must be an array`);
+      }
+      if (ev.fail_on_actions !== undefined && !Array.isArray(ev.fail_on_actions)) {
+        errors.push(`Control ${ctrl.id}: evaluation.fail_on_actions must be an array`);
+      }
+      if (ev.min_grade !== undefined && typeof ev.min_grade !== 'string') {
+        errors.push(`Control ${ctrl.id}: evaluation.min_grade must be a string`);
       }
     }
   }

@@ -84,6 +84,19 @@ describe('validateRegistry', () => {
     expect(errors.some(e => e.includes('missing "evaluation"'))).toBe(true);
   });
 
+  it('catches unknown tool in evaluation.required_tools', () => {
+    const data = {
+      controls: [
+        {
+          id: 'X001', title: 'T', domain: 'security',
+          evaluation: { required_tools: ['scan_security', 'scan_typo'] },
+        },
+      ],
+    };
+    const errors = validateRegistry(data);
+    expect(errors.some(e => e.includes('required_tools') && e.includes('scan_typo'))).toBe(true);
+  });
+
   it('catches invalid OWASP tags', () => {
     const data = {
       controls: [

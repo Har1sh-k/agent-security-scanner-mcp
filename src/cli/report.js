@@ -478,6 +478,10 @@ export async function runReport(args) {
     return;
   }
 
+  if (threatModel) {
+    console.log('  Note: --threat-model currently only produces output with --json. HTML rendering is planned.');
+  }
+
   // Generate HTML report
   const html = generateHtml(scanResult, trends, diff);
   const scannerDir = join(dirPath, '.scanner');
