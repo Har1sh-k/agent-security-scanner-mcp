@@ -37,7 +37,7 @@ This is an MCP (Model Context Protocol) server that provides security scanning t
 ### Directory Structure
 
 ```
-prooflayer-agent-security/
+agent-security-scanner-mcp/
 ├── index.js                    # Entry point: MCP server, tool registration, CLI routing
 ├── package.json                # npm package manifest (v4.0.0, ESM)
 ├── vitest.config.js            # Test config (60s timeout, sequential)

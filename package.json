@@ -1,12 +1,11 @@
 {
-  "name": "prooflayer-agent-security",
+  "name": "agent-security-scanner-mcp",
   "version": "4.0.0",
-  "mcpName": "io.github.sinewaveai/prooflayer-agent-security",
+  "mcpName": "io.github.sinewaveai/agent-security-scanner-mcp",
   "description": "Security scanner MCP server for AI coding agents. Prompt injection firewall, package hallucination detection (4.3M+ packages), 1700+ vulnerability rules with AST & taint analysis, LLM-powered semantic code review, auto-fix. For Claude Code, Cursor, Windsurf, Cline, OpenClaw.",
   "main": "index.js",
   "type": "module",
   "bin": {
-    "prooflayer-agent-security": "index.js",
     "agent-security-scanner-mcp": "index.js"
   },
   "scripts": {
@@ -114,7 +113,16 @@
     "python_taint_fallback.py",
     "src/lib/*.js",
     "compliance/**",
-    "code-review-agent/**"
+    "code-review-agent/README.md",
+    "code-review-agent/TODO.md",
+    "code-review-agent/package.json",
+    "code-review-agent/tsconfig.json",
+    "code-review-agent/vitest.config.ts",
+    "code-review-agent/.env.example",
+    "code-review-agent/bin/**",
+    "code-review-agent/src/**",
+    "code-review-agent/dist/**",
+    "code-review-agent/tests/**"
   ],
   "devDependencies": {
     "all-the-package-names": "^2.0.2349",

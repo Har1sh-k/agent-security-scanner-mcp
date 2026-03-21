@@ -5,14 +5,14 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 
-const SCANNER_HOOK_MARKER = 'prooflayer-agent-security';
+const SCANNER_HOOK_MARKER = 'agent-security-scanner-mcp';
 
 function buildHooksConfig(withPromptGuard) {
   const hooks = {
     'post-tool-use': [
       {
         matcher: 'Write|Edit|MultiEdit',
-        command: `npx prooflayer-agent-security scan-security "$TOOL_INPUT_FILE_PATH" --verbosity minimal`,
+        command: `npx agent-security-scanner-mcp scan-security "$TOOL_INPUT_FILE_PATH" --verbosity minimal`,
       },
     ],
   };
@@ -21,7 +21,7 @@ function buildHooksConfig(withPromptGuard) {
     hooks['pre-tool-use'] = [
       {
         matcher: 'Bash',
-        command: `npx prooflayer-agent-security scan-prompt "$TOOL_INPUT_COMMAND" --verbosity minimal`,
+        command: `npx agent-security-scanner-mcp scan-prompt "$TOOL_INPUT_COMMAND" --verbosity minimal`,
       },
     ];
   }

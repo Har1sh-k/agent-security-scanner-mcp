@@ -134,7 +134,7 @@ Stop analysis when estimated cost reaches a configurable threshold (e.g., `--max
 
 ### MCP server integration
 
-Expose cr-agent as an MCP tool in the parent prooflayer-agent-security server, so AI coding assistants can invoke semantic code review alongside the existing rules-based scanner.
+Expose cr-agent as an MCP tool in the parent agent-security-scanner-mcp server, so AI coding assistants can invoke semantic code review alongside the existing rules-based scanner.
 
 ### SARIF upload
 

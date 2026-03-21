@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.sinewaveai/prooflayer-agent-security",
+  "name": "io.github.sinewaveai/agent-security-scanner-mcp",
   "description": "MCP security scanner with prompt injection firewall, package hallucination detection, LLM-powered code review, and auto-fix.",
   "version": "4.0.0",
   "transport": "stdio",
