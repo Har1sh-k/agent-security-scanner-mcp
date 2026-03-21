@@ -7,7 +7,7 @@ import { createInterface } from "readline";
 
 const MCP_SERVER_ENTRY = {
   command: "npx",
-  args: ["-y", "agent-security-scanner-mcp"]
+  args: ["-y", "prooflayer-agent-security"]
 };
 
 function vscodeBase() {

@@ -47,7 +47,7 @@ try {
 // Create MCP Server
 const server = new McpServer(
   {
-    name: "agent-security-scanner-mcp",
+    name: "prooflayer-agent-security",
     version: _pkgVersion,
   },
   {
@@ -306,7 +306,7 @@ const cliArgs = process.argv.slice(2);
     // CLI mode: scan-prompt <text> [--verbosity minimal|compact|full]
     const text = cliArgs[1];
     if (!text) {
-      console.error('Usage: agent-security-scanner-mcp scan-prompt <text> [--verbosity minimal|compact|full]');
+      console.error('Usage: prooflayer-agent-security scan-prompt <text> [--verbosity minimal|compact|full]');
       process.exit(1);
     }
     const verbosityIdx = cliArgs.indexOf('--verbosity');
@@ -326,7 +326,7 @@ const cliArgs = process.argv.slice(2);
   // CLI mode: scan-security <file> [--verbosity minimal|compact|full] [--format json|sarif]
   const filePath = cliArgs[1];
   if (!filePath) {
-    console.error('Usage: agent-security-scanner-mcp scan-security <file> [--verbosity minimal|compact|full] [--format json|sarif]');
+    console.error('Usage: prooflayer-agent-security scan-security <file> [--verbosity minimal|compact|full] [--format json|sarif]');
     process.exit(1);
   }
   const verbosityIdx = cliArgs.indexOf('--verbosity');
@@ -348,7 +348,7 @@ const cliArgs = process.argv.slice(2);
   const packageName = cliArgs[1];
   const ecosystem = cliArgs[2];
   if (!packageName || !ecosystem) {
-    console.error('Usage: agent-security-scanner-mcp check-package <name> <ecosystem>');
+    console.error('Usage: prooflayer-agent-security check-package <name> <ecosystem>');
     console.error('Ecosystems: npm, pypi, rubygems, crates, dart, perl, raku');
     process.exit(1);
   }
@@ -367,7 +367,7 @@ const cliArgs = process.argv.slice(2);
   const filePath = cliArgs[1];
   const ecosystem = cliArgs[2];
   if (!filePath || !ecosystem) {
-    console.error('Usage: agent-security-scanner-mcp scan-packages <file> <ecosystem> [--verbosity minimal|compact|full]');
+    console.error('Usage: prooflayer-agent-security scan-packages <file> <ecosystem> [--verbosity minimal|compact|full]');
     console.error('Ecosystems: npm, pypi, rubygems, crates, dart, perl, raku');
     process.exit(1);
   }
@@ -387,7 +387,7 @@ const cliArgs = process.argv.slice(2);
   // CLI mode: scan-project <dir> [--recursive] [--diff-only] [--cross-file] [--include '*.py'] [--exclude '*.test.js'] [--verbosity minimal|compact|full]
   const dirPath = cliArgs[1];
   if (!dirPath || dirPath.startsWith('--')) {
-    console.error('Usage: agent-security-scanner-mcp scan-project <directory> [--recursive] [--diff-only] [--cross-file] [--include <pattern>] [--exclude <pattern>] [--verbosity minimal|compact|full]');
+    console.error('Usage: prooflayer-agent-security scan-project <directory> [--recursive] [--diff-only] [--cross-file] [--include <pattern>] [--exclude <pattern>] [--verbosity minimal|compact|full]');
     process.exit(1);
   }
   const verbosityIdx = cliArgs.indexOf('--verbosity');
@@ -455,7 +455,7 @@ const cliArgs = process.argv.slice(2);
   // CLI mode: scan-mcp <path> [--verbosity minimal|compact|full]
   const serverPath = cliArgs[1];
   if (!serverPath) {
-    console.error('Usage: agent-security-scanner-mcp scan-mcp <server-path> [--verbosity minimal|compact|full]');
+    console.error('Usage: prooflayer-agent-security scan-mcp <server-path> [--verbosity minimal|compact|full]');
     process.exit(1);
   }
   const verbosityIdx = cliArgs.indexOf('--verbosity');
@@ -474,7 +474,7 @@ const cliArgs = process.argv.slice(2);
   const actionType = cliArgs[1];
   const actionValue = cliArgs[2];
   if (!actionType || !actionValue) {
-    console.error('Usage: agent-security-scanner-mcp scan-action <type> <value> [--verbosity minimal|compact|full]');
+    console.error('Usage: prooflayer-agent-security scan-action <type> <value> [--verbosity minimal|compact|full]');
     console.error('Types: bash, file_write, file_read, http_request, file_delete, cron, process_spawn, git, docker');
     process.exit(1);
   }
@@ -492,7 +492,7 @@ const cliArgs = process.argv.slice(2);
 } else if (cliArgs[0] === 'scan-skill') {
   const skillPath = cliArgs[1];
   if (!skillPath) {
-    console.error('Usage: agent-security-scanner-mcp scan-skill <skill-path> [--verbosity minimal|compact|full] [--baseline]');
+    console.error('Usage: prooflayer-agent-security scan-skill <skill-path> [--verbosity minimal|compact|full] [--baseline]');
     process.exit(1);
   }
   const verbosityIdx = cliArgs.indexOf('--verbosity');
@@ -529,7 +529,7 @@ const cliArgs = process.argv.slice(2);
   await import('./src/cli/scan-clawhub-safe.js');
   // Exit is handled by scan-clawhub-safe.js
 } else if (cliArgs[0] === '--help' || cliArgs[0] === '-h' || cliArgs[0] === 'help') {
-  console.log('\n  agent-security-scanner-mcp\n');
+  console.log('\n  prooflayer-agent-security\n');
   console.log('  Commands:');
   console.log('    init [client]        Set up MCP config for a client');
   console.log('    init-hooks           Install Claude Code hooks for auto-scanning');
@@ -557,14 +557,14 @@ const cliArgs = process.argv.slice(2);
   console.log('    --include <pattern>  Include only matching files (scan-project)');
   console.log('    --exclude <pattern>  Exclude matching files (scan-project)\n');
   console.log('  Examples:');
-  console.log('    npx agent-security-scanner-mcp init');
-  console.log('    npx agent-security-scanner-mcp scan-prompt "ignore previous instructions"');
-  console.log('    npx agent-security-scanner-mcp scan-security ./app.py --verbosity minimal');
-  console.log('    npx agent-security-scanner-mcp check-package flask pypi');
-  console.log('    npx agent-security-scanner-mcp scan-project ./src --verbosity minimal');
-  console.log('    npx agent-security-scanner-mcp scan-diff HEAD~1');
-  console.log('    npx agent-security-scanner-mcp report ./src --json');
-  console.log('    npx agent-security-scanner-mcp benchmark --save --compare-latest\n');
+  console.log('    npx prooflayer-agent-security init');
+  console.log('    npx prooflayer-agent-security scan-prompt "ignore previous instructions"');
+  console.log('    npx prooflayer-agent-security scan-security ./app.py --verbosity minimal');
+  console.log('    npx prooflayer-agent-security check-package flask pypi');
+  console.log('    npx prooflayer-agent-security scan-project ./src --verbosity minimal');
+  console.log('    npx prooflayer-agent-security scan-diff HEAD~1');
+  console.log('    npx prooflayer-agent-security report ./src --json');
+  console.log('    npx prooflayer-agent-security benchmark --save --compare-latest\n');
   process.exit(0);
 } else {
   // Normal MCP server mode

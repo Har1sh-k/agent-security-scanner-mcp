@@ -37,9 +37,9 @@ This is an MCP (Model Context Protocol) server that provides security scanning t
 ### Directory Structure
 
 ```
-agent-security-scanner-mcp/
+prooflayer-agent-security/
 ├── index.js                    # Entry point: MCP server, tool registration, CLI routing
-├── package.json                # npm package manifest (v3.9.0, ESM)
+├── package.json                # npm package manifest (v4.0.0, ESM)
 ├── vitest.config.js            # Test config (60s timeout, sequential)
 ├── openclaw.plugin.json        # OpenClaw plugin metadata
 ├── server.json                 # MCP server manifest

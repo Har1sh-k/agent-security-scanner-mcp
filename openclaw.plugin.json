@@ -1,6 +1,6 @@
 {
-  "name": "agent-security-scanner-mcp",
-  "version": "3.10.3",
+  "name": "prooflayer-agent-security",
+  "version": "4.0.0",
   "description": "Security scanner for OpenClaw: prompt injection firewall, package hallucination detection, code vulnerability scanning, auto-fix",
   "author": "Sinewave AI",
   "license": "MIT",

@@ -266,7 +266,7 @@ function toSarif(result: AnalysisResult): object {
           driver: {
             name: 'cr-agent',
             version: '0.1.0',
-            informationUri: 'https://github.com/anthropics/agent-security-scanner-mcp',
+            informationUri: 'https://github.com/sinewaveai/agent-security-scanner-mcp',
             rules: result.findings.map((f, i) => ({
               id: `CR${String(i + 1).padStart(3, '0')}`,
               name: f.title.replace(/\s+/g, ''),

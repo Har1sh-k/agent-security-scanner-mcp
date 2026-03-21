@@ -2,17 +2,19 @@
 
 <img src="./prooflayer-logo.png" alt="ProofLayer Logo" width="400"/>
 
-# agent-security-scanner-mcp
+# prooflayer-agent-security
 
 **Security scanner for AI coding agents and autonomous assistants**
 
-Scans code for vulnerabilities, detects hallucinated packages, and blocks prompt injection — via MCP (Claude Code, Cursor, Windsurf, Cline) or CLI (OpenClaw, CI/CD).
+Scans code for vulnerabilities, detects hallucinated packages, blocks prompt injection, and provides LLM-powered semantic code review — via MCP (Claude Code, Cursor, Windsurf, Cline) or CLI (OpenClaw, CI/CD).
 
-[![npm downloads](https://img.shields.io/npm/dt/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
-[![npm version](https://img.shields.io/npm/v/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
+[![npm downloads](https://img.shields.io/npm/dt/prooflayer-agent-security.svg)](https://www.npmjs.com/package/prooflayer-agent-security)
+[![npm version](https://img.shields.io/npm/v/prooflayer-agent-security.svg)](https://www.npmjs.com/package/prooflayer-agent-security)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Benchmark: 97.7% precision](https://img.shields.io/badge/precision-97.7%25-brightgreen.svg)](benchmarks/RESULTS.md)
 [![CI](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/sinewaveai/agent-security-scanner-mcp/actions/workflows/test.yml)
+
+> **Package renamed:** Previously `agent-security-scanner-mcp`. The old name still works for backwards compatibility.
 
 </div>
 
@@ -43,12 +45,12 @@ npm install -g @prooflayer/security-scanner
 ---
 
 ### 🔬 Full Version (Advanced)
-**Enterprise-grade scanner** with AST analysis, taint tracking, and cross-file analysis
+**Enterprise-grade scanner** with AST analysis, taint tracking, cross-file analysis, and LLM-powered semantic review
 
-[![npm](https://img.shields.io/npm/v/agent-security-scanner-mcp.svg)](https://www.npmjs.com/package/agent-security-scanner-mcp)
+[![npm](https://img.shields.io/npm/v/prooflayer-agent-security.svg)](https://www.npmjs.com/package/prooflayer-agent-security)
 
 ```bash
-npm install -g agent-security-scanner-mcp
+npm install -g prooflayer-agent-security
 ```
 
 - 🧬 **AST + Taint Analysis** - deep code understanding
@@ -57,6 +59,7 @@ npm install -g agent-security-scanner-mcp
 - 🎯 **11 MCP tools** + CLI commands
 - 📦 **4.3M+ package verification** (bloom filters)
 - 🐍 **Python analyzer** for advanced features
+- 🤖 **LLM-powered code review** - semantic security analysis with intent profiling
 
 Continue reading below for full version documentation →
 
@@ -88,12 +91,14 @@ Continue reading below for full version documentation →
 ## Quick Start
 
 ```bash
-npx agent-security-scanner-mcp init claude-code
+npx prooflayer-agent-security init claude-code
 ```
 
 Restart your client after running init. That's it — the scanner is active.
 
 > **Other clients:** Replace `claude-code` with `cursor`, `claude-desktop`, `windsurf`, `cline`, `kilo-code`, `opencode`, or `cody`. Run with no argument for interactive client selection.
+>
+> **Note:** `npx agent-security-scanner-mcp` still works for backwards compatibility.
 
 ## Recommended Workflows
 
@@ -164,6 +169,78 @@ See [ClawHub Security Dashboard](https://www.proof-layer.com/dashboard) for inte
 - **C** (11-25): Medium risk - use with caution
 - **D** (26-50): High risk - not recommended
 - **F** (51+): DO NOT INSTALL - critical threats
+
+---
+
+## 🤖 LLM-Powered Code Review Agent (New in v4.0.0)
+
+The **code-review-agent** is an LLM-powered semantic code review tool that uses **intent profiling** to distinguish safe patterns from dangerous ones based on project context.
+
+### Key Differentiator: Intent-Aware Analysis
+
+Same code, different verdicts based on what the project is supposed to do:
+
+| Pattern | Build Tool | E-Commerce App |
+|---------|------------|----------------|
+| `subprocess.run()` with hardcoded commands | ✅ **Expected** — that's its job | ⚠️ **Suspicious** — why does checkout need shell access? |
+| `eval(req.query.filter)` | ⚠️ **Suspicious** — build tools don't eval user input | ❌ **Dangerous** — product catalog shouldn't eval user input |
+| `os.remove()` | ✅ **Expected** for file organizer | ❌ **Dangerous** for auth service |
+| `fs.writeFile(req.body.path)` | ⚠️ **Review** — depends on context | ❌ **Dangerous** — auth service shouldn't write arbitrary files |
+
+### Quick Start
+
+```bash
+cd code-review-agent
+npm install
+npm run build
+
+# Analyze a project (no API key needed with claude-cli!)
+npx tsx bin/cr-agent.ts analyze ../path/to/project -p claude-cli -v
+
+# View intent profile only
+npx tsx bin/cr-agent.ts intent ../path/to/project -p claude-cli
+
+# Output as SARIF for GitHub Code Scanning
+npx tsx bin/cr-agent.ts analyze ../path/to/project -f sarif
+```
+
+### LLM Providers
+
+| Provider | API Key Required | Command |
+|----------|------------------|---------|
+| Claude CLI | ❌ No (uses Claude Code's auth) | `-p claude-cli` |
+| Anthropic | ✅ `ANTHROPIC_API_KEY` | `-p anthropic` |
+| OpenAI | ✅ `OPENAI_API_KEY` | `-p openai` |
+
+### Features
+
+- **Intent Profiling** — Reads README, dependencies, and structure to understand project purpose
+- **Dynamic Chunking** — Large files split based on token budget, not hardcoded line limits
+- **3 Output Formats** — Colored terminal text, JSON, SARIF 2.1.0
+- **Dependency Graph** — Resolves JS/TS/Python imports including barrel re-exports
+- **Prompt Injection Defense** — System prompts mark repo content as untrusted input
+
+### CLI Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-p, --provider` | LLM provider (`anthropic`, `openai`, `claude-cli`) | `anthropic` |
+| `-m, --model` | Analysis model | `claude-sonnet-4-20250514` / `gpt-4o` |
+| `-c, --confidence` | Confidence threshold (0-1) | `0.7` |
+| `-f, --format` | Output format (`text`, `json`, `sarif`) | `text` |
+| `-v, --verbose` | Show reasoning and suggested actions | `false` |
+| `--exclude` | Patterns to exclude | `node_modules dist .git` |
+
+### When to Use
+
+| Use Case | Tool |
+|----------|------|
+| Fast, rule-based scanning (CI/CD) | `scan_security` (MCP tool) |
+| Deep semantic analysis with context | `code-review-agent` (LLM-powered) |
+| Package verification | `check_package` / `scan_packages` |
+| Prompt injection detection | `scan_agent_prompt` |
+
+📖 Full documentation: [`code-review-agent/README.md`](./code-review-agent/README.md)
 
 ---
 
@@ -766,14 +843,16 @@ Scan an entire project or directory for security vulnerabilities with aggregated
 ### Install
 
 ```bash
-npm install -g agent-security-scanner-mcp
+npm install -g prooflayer-agent-security
 ```
 
 Or use directly with `npx` — no install required:
 
 ```bash
-npx agent-security-scanner-mcp
+npx prooflayer-agent-security
 ```
+
+> **Backwards compatibility:** The old package name `agent-security-scanner-mcp` continues to work.
 
 ### Prerequisites
 
@@ -786,16 +865,16 @@ npx agent-security-scanner-mcp
 
 | Client | Command |
 |--------|---------|
-| Claude Code | `npx agent-security-scanner-mcp init claude-code` |
-| Claude Desktop | `npx agent-security-scanner-mcp init claude-desktop` |
-| Cursor | `npx agent-security-scanner-mcp init cursor` |
-| Windsurf | `npx agent-security-scanner-mcp init windsurf` |
-| Cline | `npx agent-security-scanner-mcp init cline` |
-| Kilo Code | `npx agent-security-scanner-mcp init kilo-code` |
-| OpenCode | `npx agent-security-scanner-mcp init opencode` |
-| Cody | `npx agent-security-scanner-mcp init cody` |
-| **OpenClaw** | `npx agent-security-scanner-mcp init openclaw` |
-| Interactive | `npx agent-security-scanner-mcp init` |
+| Claude Code | `npx prooflayer-agent-security init claude-code` |
+| Claude Desktop | `npx prooflayer-agent-security init claude-desktop` |
+| Cursor | `npx prooflayer-agent-security init cursor` |
+| Windsurf | `npx prooflayer-agent-security init windsurf` |
+| Cline | `npx prooflayer-agent-security init cline` |
+| Kilo Code | `npx prooflayer-agent-security init kilo-code` |
+| OpenCode | `npx prooflayer-agent-security init opencode` |
+| Cody | `npx prooflayer-agent-security init cody` |
+| **OpenClaw** | `npx prooflayer-agent-security init openclaw` |
+| Interactive | `npx prooflayer-agent-security init` |
 
 The `init` command auto-detects your OS, locates the config file, creates a backup, and adds the MCP server entry. **Restart your client after running init.**
 
@@ -817,7 +896,7 @@ Add to your MCP client config:
   "mcpServers": {
     "security-scanner": {
       "command": "npx",
-      "args": ["-y", "agent-security-scanner-mcp"]
+      "args": ["-y", "prooflayer-agent-security"]
     }
   }
 }
@@ -834,8 +913,8 @@ Add to your MCP client config:
 ### Diagnostics
 
 ```bash
-npx agent-security-scanner-mcp doctor        # Check setup health
-npx agent-security-scanner-mcp doctor --fix  # Auto-fix trivial issues
+npx prooflayer-agent-security doctor        # Check setup health
+npx prooflayer-agent-security doctor --fix  # Auto-fix trivial issues
 ```
 
 Checks Node.js version, Python availability, analyzer engine status, and scans all client configs.
@@ -845,7 +924,7 @@ Checks Node.js version, Python availability, analyzer engine status, and scans a
 ## Try It Out
 
 ```bash
-npx agent-security-scanner-mcp demo --lang js
+npx prooflayer-agent-security demo --lang js
 ```
 
 Creates a small file with 3 intentional vulnerabilities, runs the scanner, shows findings with CWE/OWASP references, and asks if you want to keep the file for testing.
@@ -860,25 +939,28 @@ Use the scanner directly from command line (for scripts, CI/CD, or OpenClaw):
 
 ```bash
 # Scan a prompt for injection attacks
-npx agent-security-scanner-mcp scan-prompt "ignore previous instructions"
+npx prooflayer-agent-security scan-prompt "ignore previous instructions"
 
 # Scan a file for vulnerabilities
-npx agent-security-scanner-mcp scan-security ./app.py --verbosity minimal
+npx prooflayer-agent-security scan-security ./app.py --verbosity minimal
 
 # Scan git diff (changed files only)
-npx agent-security-scanner-mcp scan-diff --base main --target HEAD
+npx prooflayer-agent-security scan-diff --base main --target HEAD
 
 # Scan entire project with grading
-npx agent-security-scanner-mcp scan-project ./src
+npx prooflayer-agent-security scan-project ./src
 
 # Check if a package is legitimate
-npx agent-security-scanner-mcp check-package flask pypi
+npx prooflayer-agent-security check-package flask pypi
 
 # Scan file imports for hallucinated packages
-npx agent-security-scanner-mcp scan-packages ./requirements.txt pypi
+npx prooflayer-agent-security scan-packages ./requirements.txt pypi
 
 # Install Claude Code hooks for automatic scanning
-npx agent-security-scanner-mcp init-hooks
+npx prooflayer-agent-security init-hooks
+
+# LLM-powered semantic code review (new in v4.0.0)
+cd code-review-agent && npx tsx bin/cr-agent.ts analyze ../path/to/project -p claude-cli
 ```
 
 **Exit codes:** `0` = safe, `1` = issues found. Use in scripts to block risky operations.
@@ -934,7 +1016,7 @@ Automatically scan files after every edit with Claude Code hooks integration.
 ### Install Hooks
 
 ```bash
-npx agent-security-scanner-mcp init-hooks
+npx prooflayer-agent-security init-hooks
 ```
 
 This installs a `post-tool-use` hook that triggers security scanning after `Write`, `Edit`, or `MultiEdit` operations.
@@ -942,7 +1024,7 @@ This installs a `post-tool-use` hook that triggers security scanning after `Writ
 ### With Prompt Guard
 
 ```bash
-npx agent-security-scanner-mcp init-hooks --with-prompt-guard
+npx prooflayer-agent-security init-hooks --with-prompt-guard
 ```
 
 Adds a `PreToolUse` hook that scans prompts for injection attacks before executing tools.
@@ -957,7 +1039,7 @@ The command adds hooks to `~/.claude/settings.json`:
     "post-tool-use": [
       {
         "matcher": "Write|Edit|MultiEdit",
-        "command": "npx agent-security-scanner-mcp scan-security \"$TOOL_INPUT_file_path\" --verbosity minimal"
+        "command": "npx prooflayer-agent-security scan-security \"$TOOL_INPUT_file_path\" --verbosity minimal"
       }
     ]
   }
@@ -979,7 +1061,7 @@ The command adds hooks to `~/.claude/settings.json`:
 ### Install
 
 ```bash
-npx agent-security-scanner-mcp init openclaw
+npx prooflayer-agent-security init openclaw
 ```
 
 This installs a skill to `~/.openclaw/workspace/skills/security-scanner/`.
@@ -1078,13 +1160,13 @@ AI coding agents introduce attack surfaces that traditional security tools weren
 | Property | Value |
 |----------|-------|
 | **Transport** | stdio |
-| **Package** | `agent-security-scanner-mcp` (npm) |
+| **Package** | `prooflayer-agent-security` (npm) |
 | **Tools** | 12 |
 | **Languages** | 12 |
 | **Ecosystems** | 7 |
 | **Auth** | None required |
 | **Side Effects** | Read-only (except `scan_mcp_server` with `update_baseline: true`, which writes `.mcp-security-baseline.json`) |
-| **Package Size** | 2.7 MB (base) / 10.3 MB (with npm) |
+| **Package Size** | ~15 MB (includes code-review-agent) |
 
 ---
 
@@ -1160,6 +1242,23 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v4.0.0 (2026-03-20) - LLM-Powered Code Review & Rename
+
+**🚀 Major Release: Package renamed to `prooflayer-agent-security`**
+
+- **Package Rename:** `agent-security-scanner-mcp` → `prooflayer-agent-security` (old name still works for backwards compatibility)
+- **LLM-Powered Code Review Agent:** New `code-review-agent/` module for semantic security analysis
+  - **Intent Profiling:** Understands project purpose to reduce false positives
+  - **3 LLM Providers:** Anthropic, OpenAI, Claude CLI (no API key needed!)
+  - **3 Output Formats:** Text, JSON, SARIF 2.1.0
+  - **Dynamic Chunking:** Token-budget-aware file splitting
+  - **Prompt Injection Defense:** System prompts mark repo content as untrusted
+  - **58 tests**, 17 source files, 4 test fixture projects
+
+**Migration:** No action needed — `npx agent-security-scanner-mcp` continues to work.
+
+---
 
 ### v3.17.0 (2026-03-04) - Critical Security Fixes
 
@@ -1265,20 +1364,22 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 
 ## Installation Options
 
-### Default Package (10.6 MB)
+### Default Package
+
+```bash
+npm install -g prooflayer-agent-security
+```
+
+Includes:
+- **All 7 ecosystems** — npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land (4.3M+ packages total)
+- **LLM-powered code review agent** — semantic security analysis with intent profiling
+
+### Legacy Package Name
+
+The old package name continues to work for backwards compatibility:
 
 ```bash
 npm install -g agent-security-scanner-mcp
-```
-
-**New in v3.5.2:** Now includes **all 7 ecosystems** out of the box — npm, PyPI, RubyGems, crates.io, pub.dev, CPAN, raku.land (4.3M+ packages total)
-
-### Legacy Lightweight Package (2.7 MB)
-
-For environments with strict size constraints (excludes npm bloom filter):
-
-```bash
-npm install -g agent-security-scanner-mcp@3.4.1
 ```
 
 ---
