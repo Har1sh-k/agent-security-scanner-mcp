@@ -63,6 +63,8 @@ Continue reading below for full version documentation →
 
 ---
 
+> **New in v4.0.0:** LLM-powered semantic code review agent with intent profiling — understands what your project is supposed to do and flags patterns that violate that intent. Same `eval()` call = safe in a build tool, dangerous in an e-commerce app. Supports Claude CLI (no API key needed!), Anthropic, and OpenAI. [See code-review-agent](#-llm-powered-code-review-agent-new-in-v400).
+>
 > **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 16,532 ClawHub skills and found 46% have critical vulnerabilities. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Dashboard](https://www.proof-layer.com/dashboard).
 >
 > **Also in v3.10.0:** ClawProof OpenClaw plugin — 6-layer deep skill scanner (`scan_skill`) with ClawHavoc malware signatures (27 rules, 121 patterns covering reverse shells, crypto miners, info stealers, C2 beacons, and OpenClaw-specific attacks), package supply chain verification, and rug pull detection.
