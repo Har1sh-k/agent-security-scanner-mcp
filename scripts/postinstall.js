@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * postinstall.js - Attempt to install Python dependencies for tree-sitter AST engine.
- * If installation fails, the scanner gracefully falls back to regex-only mode.
+ * postinstall.js - Setup script for agent-security-scanner-mcp
+ * 1. Install Python dependencies for tree-sitter AST engine (optional)
+ * 2. Install and build code-review-agent dependencies (optional)
  */
-import { execFileSync } from "child_process";
+import { execFileSync, execSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const requirementsPath = join(__dirname, "..", "requirements.txt");
+const rootDir = join(__dirname, "..");
+const requirementsPath = join(rootDir, "requirements.txt");
+const codeReviewAgentDir = join(rootDir, "code-review-agent");
 
 // Check if Python 3 is available
 function findPython() {
@@ -33,6 +37,7 @@ function isTreeSitterInstalled(pythonCmd) {
   }
 }
 
+// Setup Python dependencies
 const pythonCmd = findPython();
 
 if (!pythonCmd) {
@@ -56,5 +61,39 @@ if (!pythonCmd) {
       "             To enable AST analysis later, run: python3 -m pip install -r requirements.txt\n" +
       "             Or run: npx agent-security-scanner-mcp doctor --fix"
     );
+  }
+}
+
+// Setup code-review-agent (LLM-powered semantic analysis)
+if (existsSync(codeReviewAgentDir)) {
+  const distExists = existsSync(join(codeReviewAgentDir, "dist", "bin", "cr-agent.js"));
+
+  if (distExists) {
+    console.log("[postinstall] code-review-agent already built — cr-agent CLI available.");
+  } else {
+    console.log("[postinstall] Setting up code-review-agent (LLM-powered code review)...");
+    try {
+      // Install dependencies
+      execSync("npm install --omit=dev", {
+        cwd: codeReviewAgentDir,
+        timeout: 180000,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+
+      // Build TypeScript
+      execSync("npm run build", {
+        cwd: codeReviewAgentDir,
+        timeout: 60000,
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+
+      console.log("[postinstall] code-review-agent installed — run: npx cr-agent --help");
+    } catch (err) {
+      console.log(
+        "[postinstall] Could not set up code-review-agent (optional LLM-powered review).\n" +
+        "             The main scanner still works. To set up manually:\n" +
+        "             cd node_modules/agent-security-scanner-mcp/code-review-agent && npm install && npm run build"
+      );
+    }
   }
 }

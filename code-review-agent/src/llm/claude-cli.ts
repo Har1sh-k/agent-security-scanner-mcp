@@ -108,10 +108,9 @@ export class ClaudeCliProvider implements LLMProvider {
   private runClaude(prompt: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const args = [
-        '-p', '-',
+        '-p',
         '--output-format', 'json',
         '--model', this.modelId,
-        '--no-session-persistence',
       ];
 
       const child = spawn('claude', args, {

@@ -187,19 +187,20 @@ Same code, different verdicts based on what the project is supposed to do:
 
 ### Quick Start
 
+After installing `agent-security-scanner-mcp`, the `cr-agent` CLI is automatically available:
+
 ```bash
-cd code-review-agent
-npm install
-npm run build
+# Install the package (cr-agent is included)
+npm install -g agent-security-scanner-mcp
 
 # Analyze a project (no API key needed with claude-cli!)
-npx tsx bin/cr-agent.ts analyze ../path/to/project -p claude-cli -v
+npx cr-agent analyze ./path/to/project -p claude-cli --verbose
 
 # View intent profile only
-npx tsx bin/cr-agent.ts intent ../path/to/project -p claude-cli
+npx cr-agent intent ./path/to/project -p claude-cli
 
 # Output as SARIF for GitHub Code Scanning
-npx tsx bin/cr-agent.ts analyze ../path/to/project -f sarif
+npx cr-agent analyze ./path/to/project -f sarif -p claude-cli
 ```
 
 ### LLM Providers
@@ -956,7 +957,7 @@ npx agent-security-scanner-mcp scan-packages ./requirements.txt pypi
 npx agent-security-scanner-mcp init-hooks
 
 # LLM-powered semantic code review (new in v4.0.0)
-cd code-review-agent && npx tsx bin/cr-agent.ts analyze ../path/to/project -p claude-cli
+npx cr-agent analyze ./path/to/project -p claude-cli --verbose
 ```
 
 **Exit codes:** `0` = safe, `1` = issues found. Use in scripts to block risky operations.
