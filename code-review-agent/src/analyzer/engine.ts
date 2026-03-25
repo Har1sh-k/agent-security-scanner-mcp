@@ -13,6 +13,7 @@ import { SemanticAnalyzer } from './semantic.js';
 import { buildProjectContext } from '../context/project.js';
 import { buildFileContext } from '../context/file.js';
 import { DependencyGraphBuilder } from '../graph/dependency.js';
+import { postFilterFindings, suppressCarrierFindings } from './postprocess.js';
 
 const CODE_EXTENSIONS = new Set([
   '.js', '.mjs', '.cjs', '.jsx',
@@ -90,6 +91,9 @@ export class AnalysisEngine {
     const analyzer = new SemanticAnalyzer(
       this.router.getAnalysisProvider(),
       this.router.getTriageProvider(),
+      this.options.mode,
+      projectRoot,
+      graph,
     );
 
     // Triage files in parallel
@@ -206,6 +210,14 @@ export class AnalysisEngine {
     this.onProgress('finalize', `Deduplicating ${allFindings.length} raw finding(s)`);
     allFindings = this.dedup(allFindings);
 
+    // Mode-aware post-filtering
+    const beforePostFilter = allFindings.length;
+    allFindings = postFilterFindings(allFindings, this.options.mode);
+    if (this.options.mode === 'security') {
+      allFindings = suppressCarrierFindings(allFindings);
+      this.onProgress('finalize', `Security filter: ${beforePostFilter} → ${allFindings.length}`);
+    }
+
     // Filter by confidence
     const beforeFilter = allFindings.length;
     allFindings = allFindings.filter(
@@ -282,10 +294,11 @@ export class AnalysisEngine {
   }
 
   private dedup(findings: Finding[]): Finding[] {
+    // Phase 1: group by file + rich signature (CWE > normalized title > category)
     const groups = new Map<string, Finding[]>();
 
     for (const finding of findings) {
-      const key = `${finding.location.file}:${finding.category}`;
+      const key = `${finding.location.file}:${this.dedupSignature(finding)}`;
       const group = groups.get(key) ?? [];
       group.push(finding);
       groups.set(key, group);
@@ -293,12 +306,32 @@ export class AnalysisEngine {
 
     const result: Finding[] = [];
     for (const group of groups.values()) {
-      // Merge overlapping line ranges, keep highest confidence
       const merged = this.mergeOverlapping(group);
       result.push(...merged);
     }
 
     return result;
+  }
+
+  /**
+   * Generate a dedup signature that's more precise than just category.
+   * Priority: CWE (most specific) > normalized title > category fallback.
+   */
+  private dedupSignature(finding: Finding): string {
+    if (finding.cwe) {
+      return `cwe:${finding.cwe.toLowerCase()}`;
+    }
+
+    // Normalize the title: lowercase, strip numbers/punctuation, collapse whitespace
+    const normalized = finding.title
+      .toLowerCase()
+      .replace(/\b(line|col|at)\s*\d+/g, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Use first 60 chars of normalized title + category for grouping
+    return `${finding.category}:${normalized.slice(0, 60)}`;
   }
 
   private mergeOverlapping(findings: Finding[]): Finding[] {
@@ -360,6 +393,7 @@ export class AnalysisEngine {
 
     const runNext = async (): Promise<void> => {
       while (index < items.length) {
+        // Safe: index++ between awaits is non-concurrent in single-threaded JS
         const currentIndex = index++;
         results[currentIndex] = await fn(items[currentIndex]);
       }

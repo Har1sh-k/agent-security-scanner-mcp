@@ -2,6 +2,7 @@
 export { AnalysisEngine, type ProgressCallback } from './analyzer/engine.js';
 export { IntentProfiler } from './analyzer/intent.js';
 export { SemanticAnalyzer } from './analyzer/semantic.js';
+export { postFilterFindings, suppressCarrierFindings } from './analyzer/postprocess.js';
 
 // LLM providers
 export { AnthropicProvider } from './llm/anthropic.js';
@@ -16,6 +17,8 @@ export { zodToJsonSchema, zodToAnthropicTool, zodToOpenAIResponseFormat } from '
 export { buildProjectContext, formatProjectContextForLLM } from './context/project.js';
 export { buildFileContext, isTestFile, isConfigFile, isGeneratedFile } from './context/file.js';
 export { ContextAssembler } from './context/assembler.js';
+export { buildRelatedFileSummaries, formatRelatedFileSummaries } from './context/security-summary.js';
+export type { RelatedFileSummary } from './context/security-summary.js';
 
 // Graph
 export { DependencyGraphBuilder } from './graph/dependency.js';
@@ -32,6 +35,7 @@ export type {
   DependencyGraph,
 } from './types/analysis.js';
 export type {
+  AnalysisMode,
   AnalysisOptions,
   CRAgentConfig,
 } from './types/config.js';
