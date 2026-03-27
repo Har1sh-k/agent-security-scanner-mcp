@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkS
 import { join } from 'path';
 import { discoverDependencies } from '../lib/lockfile-parsers.js';
 import { serialize } from '../lib/cyclonedx.js';
+import { ecosystemFromPurlType } from '../lib/purl.js';
 
 export const sbomDiffSchema = {
   directory_path: z.string().describe('Path to project root directory'),
@@ -164,7 +165,7 @@ function extractEcosystem(component) {
   }
   if (component.purl) {
     const match = component.purl.match(/^pkg:([^/]+)/);
-    if (match) return match[1];
+    if (match) return ecosystemFromPurlType(match[1]);
   }
   return 'unknown';
 }

@@ -3,6 +3,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { buildPurl } from './purl.js';
 
 const OSV_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
 const BATCH_SIZE = 1000;
@@ -24,7 +25,7 @@ export async function queryBatch(packages, options = {}) {
 
   // Check cache first
   for (const pkg of packages) {
-    const cacheKey = `${pkg.ecosystem}:${pkg.name}@${pkg.version}`;
+    const cacheKey = getPackageIdentity(pkg);
     const cached = readCache(cacheDir, cacheKey);
     if (cached !== null) {
       if (cached.length > 0) results.set(cacheKey, cached);
@@ -72,7 +73,7 @@ export async function queryBatch(packages, options = {}) {
 
       for (let j = 0; j < chunk.length; j++) {
         const pkg = chunk[j];
-        const cacheKey = `${pkg.ecosystem}:${pkg.name}@${pkg.version}`;
+        const cacheKey = getPackageIdentity(pkg);
         const vulns = (batchResults[j] && batchResults[j].vulns) || [];
         const mapped = vulns.map(v => mapOsvVulnerability(v, pkg));
 
@@ -127,7 +128,7 @@ function mapOsvVulnerability(osvEntry, pkg) {
     }],
     description: osvEntry.summary || osvEntry.details || '',
     affects: [{
-      ref: pkg.purl || `pkg:${pkg.ecosystem}/${pkg.name}@${pkg.version}`,
+      ref: getPackageIdentity(pkg),
     }],
     ...(fixedVersion && {
       recommendation: `Upgrade to ${fixedVersion}`,
@@ -137,6 +138,18 @@ function mapOsvVulnerability(osvEntry, pkg) {
       ...(osvEntry.aliases || []).filter(a => a !== cveId).map(a => ({ name: 'alias', value: a })),
     ],
   };
+}
+
+function getPackageIdentity(pkg) {
+  if (pkg.purl) return pkg.purl;
+
+  const purl = buildPurl(pkg.ecosystem, pkg.name, pkg.version, pkg.namespace);
+  if (purl) return purl;
+
+  if (pkg.namespace) {
+    return `${pkg.ecosystem}:${pkg.namespace}:${pkg.name}@${pkg.version}`;
+  }
+  return `${pkg.ecosystem}:${pkg.name}@${pkg.version}`;
 }
 
 function extractSeverity(osvEntry) {

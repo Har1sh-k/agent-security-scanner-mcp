@@ -1,7 +1,7 @@
 // Normalized SBOM component model — decoupled from any output format.
 // CycloneDX, SPDX, and all tools operate on this model.
 
-import { buildPurl } from './purl.js';
+import { buildPurl, parsePurl, ecosystemFromPurlType } from './purl.js';
 
 /**
  * Create a normalized component.
@@ -52,5 +52,37 @@ export function createComponentList(components = [], edges = [], metadata = {}) 
       dev: components.filter(c => c.isDev).length,
       ...metadata,
     },
+  };
+}
+
+function getPropertyValue(component, name) {
+  return component.properties?.find(p => p.name === name)?.value;
+}
+
+/**
+ * Reconstruct a normalized component from a CycloneDX component entry.
+ * Preserves canonical PURL identity and Maven group when present.
+ * @param {object} component
+ * @returns {{ name: string, version: string, ecosystem: string, isDev: boolean, isDirect: boolean, scope: string, purl: string, namespace?: string }}
+ */
+export function componentFromBomComponent(component) {
+  const parsed = component.purl ? parsePurl(component.purl) : null;
+  const ecosystem = getPropertyValue(component, 'cdx:ecosystem')
+    || (parsed ? ecosystemFromPurlType(parsed.type) : 'unknown');
+  const namespace = component.group || parsed?.namespace;
+  const name = parsed?.name || component.name;
+  const version = parsed?.version || component.version || 'unknown';
+  const isDev = getPropertyValue(component, 'cdx:development') === 'true';
+  const purl = component.purl || buildPurl(ecosystem, name, version, namespace);
+
+  return {
+    name,
+    version,
+    ecosystem,
+    isDev,
+    isDirect: false,
+    scope: component.scope || (isDev ? 'optional' : 'required'),
+    purl,
+    ...(namespace && { namespace }),
   };
 }

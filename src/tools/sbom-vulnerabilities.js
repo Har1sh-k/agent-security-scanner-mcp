@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { discoverDependencies } from '../lib/lockfile-parsers.js';
-import { serialize, addVulnerabilities } from '../lib/cyclonedx.js';
+import { componentFromBomComponent } from '../lib/sbom-component.js';
 import { queryBatch } from '../lib/osv-client.js';
 
 export const sbomVulnerabilitiesSchema = {
@@ -27,13 +27,13 @@ export async function sbomScanVulnerabilities({ directory_path, sbom_path, sever
   let projectName = 'unknown';
   if (sbom_path) {
     if (!existsSync(sbom_path)) return error(`SBOM file not found: ${sbom_path}`);
-    const bom = JSON.parse(readFileSync(sbom_path, 'utf-8'));
-    components = (bom.components || []).map(c => ({
-      name: c.name,
-      version: c.version,
-      ecosystem: extractEcosystem(c),
-      purl: c.purl,
-    }));
+    let bom;
+    try {
+      bom = JSON.parse(readFileSync(sbom_path, 'utf-8'));
+    } catch {
+      return error(`Failed to parse SBOM: ${sbom_path}`);
+    }
+    components = (bom.components || []).map(componentFromBomComponent);
     projectName = bom.metadata?.component?.name || 'unknown';
   } else {
     if (!existsSync(directory_path)) return error(`Directory not found: ${directory_path}`);
@@ -114,22 +114,6 @@ export async function sbomScanVulnerabilities({ directory_path, sbom_path, sever
   return {
     content: [{ type: 'text', text: JSON.stringify(response, null, 2) }],
   };
-}
-
-function extractEcosystem(component) {
-  // Try to extract from properties or purl
-  if (component.properties) {
-    const eco = component.properties.find(p => p.name === 'cdx:ecosystem');
-    if (eco) return eco.value;
-  }
-  if (component.purl) {
-    const match = component.purl.match(/^pkg:([^/]+)/);
-    if (match) {
-      const purlToEco = { npm: 'npm', pypi: 'pypi', gem: 'rubygems', cargo: 'crates', golang: 'go', maven: 'java', pub: 'dart' };
-      return purlToEco[match[1]] || match[1];
-    }
-  }
-  return 'unknown';
 }
 
 function error(msg) {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { existsSync, readFileSync } from 'fs';
 import { discoverDependencies } from '../lib/lockfile-parsers.js';
+import { componentFromBomComponent } from '../lib/sbom-component.js';
 import { isHallucinated } from './check-package.js';
 
 // Ecosystems supported by the hallucination checker (bloom filters + text sets)
@@ -25,13 +26,13 @@ export async function sbomCheckHallucinations({ directory_path, sbom_path, verbo
   let components;
   if (sbom_path) {
     if (!existsSync(sbom_path)) return error(`SBOM file not found: ${sbom_path}`);
-    const bom = JSON.parse(readFileSync(sbom_path, 'utf-8'));
-    components = (bom.components || []).map(c => ({
-      name: c.name,
-      version: c.version,
-      ecosystem: extractEcosystem(c),
-      purl: c.purl,
-    }));
+    let bom;
+    try {
+      bom = JSON.parse(readFileSync(sbom_path, 'utf-8'));
+    } catch {
+      return error(`Failed to parse SBOM: ${sbom_path}`);
+    }
+    components = (bom.components || []).map(componentFromBomComponent);
   } else {
     if (!existsSync(directory_path)) return error(`Directory not found: ${directory_path}`);
     const componentList = discoverDependencies(directory_path);
@@ -109,21 +110,6 @@ export async function sbomCheckHallucinations({ directory_path, sbom_path, verbo
   return {
     content: [{ type: 'text', text: JSON.stringify(response, null, 2) }],
   };
-}
-
-function extractEcosystem(component) {
-  if (component.properties) {
-    const eco = component.properties.find(p => p.name === 'cdx:ecosystem');
-    if (eco) return eco.value;
-  }
-  if (component.purl) {
-    const match = component.purl.match(/^pkg:([^/]+)/);
-    if (match) {
-      const purlToEco = { npm: 'npm', pypi: 'pypi', gem: 'rubygems', cargo: 'crates', golang: 'go', maven: 'java', pub: 'dart' };
-      return purlToEco[match[1]] || match[1];
-    }
-  }
-  return 'unknown';
 }
 
 function error(msg) {

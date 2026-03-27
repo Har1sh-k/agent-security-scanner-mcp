@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { discoverDependencies } from '../lib/lockfile-parsers.js';
 import { serialize } from '../lib/cyclonedx.js';
+import { componentFromBomComponent } from '../lib/sbom-component.js';
 import { queryBatch } from '../lib/osv-client.js';
 
 export const sbomReportSchema = {
@@ -29,28 +30,26 @@ export async function sbomExportReport({ directory_path, sbom_path, format, incl
   // Load or generate SBOM
   let bom;
   let components;
+  let scanComponents;
   if (sbom_path) {
     if (!existsSync(sbom_path)) return error(`SBOM file not found: ${sbom_path}`);
     bom = JSON.parse(readFileSync(sbom_path, 'utf-8'));
     components = bom.components || [];
+    scanComponents = components.map(componentFromBomComponent);
   } else {
     if (!existsSync(directory_path)) return error(`Directory not found: ${directory_path}`);
     const componentList = discoverDependencies(directory_path);
     bom = serialize(componentList);
     components = bom.components || [];
+    scanComponents = componentList.components;
   }
 
   // Vulnerability enrichment
   let vulnerabilities = [];
   let vulnSummary = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
-  if (includeVulns && components.length > 0) {
-    const pkgs = components.map(c => ({
-      name: c.name,
-      version: c.version,
-      ecosystem: extractEcosystem(c),
-    }));
+  if (includeVulns && scanComponents.length > 0) {
     const cacheDir = directory_path ? join(directory_path, '.scanner', 'cache', 'vuln') : null;
-    const results = await queryBatch(pkgs, { cacheDir });
+    const results = await queryBatch(scanComponents, { cacheDir });
     for (const vulns of results.values()) {
       for (const v of vulns) {
         vulnerabilities.push(v);

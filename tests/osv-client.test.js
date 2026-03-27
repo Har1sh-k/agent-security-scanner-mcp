@@ -120,6 +120,36 @@ describe('osv-client', () => {
       const results = await queryBatch([]);
       expect(results.size).toBe(0);
     });
+
+    it('keeps namespaced Maven packages distinct in query and result keys', async () => {
+      let capturedBody;
+      globalThis.fetch = async (url, opts) => {
+        capturedBody = JSON.parse(opts.body);
+        return {
+          ok: true,
+          json: async () => ({
+            results: [
+              { vulns: [{ id: 'OSV-1', summary: 'first' }] },
+              { vulns: [{ id: 'OSV-2', summary: 'second' }] },
+            ],
+          }),
+        };
+      };
+
+      const results = await queryBatch([
+        { name: 'core', version: '1.0.0', ecosystem: 'java', namespace: 'com.foo', purl: 'pkg:maven/com.foo/core@1.0.0' },
+        { name: 'core', version: '1.0.0', ecosystem: 'java', namespace: 'org.bar', purl: 'pkg:maven/org.bar/core@1.0.0' },
+      ]);
+
+      expect(capturedBody.queries[0].package.name).toBe('com.foo:core');
+      expect(capturedBody.queries[1].package.name).toBe('org.bar:core');
+      expect([...results.keys()]).toEqual([
+        'pkg:maven/com.foo/core@1.0.0',
+        'pkg:maven/org.bar/core@1.0.0',
+      ]);
+      expect(results.get('pkg:maven/com.foo/core@1.0.0')[0].id).toBe('OSV-1');
+      expect(results.get('pkg:maven/org.bar/core@1.0.0')[0].id).toBe('OSV-2');
+    });
   });
 
   describe('scoreToLevel', () => {

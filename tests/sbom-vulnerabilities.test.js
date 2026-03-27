@@ -120,4 +120,45 @@ describe('sbom-vulnerabilities', () => {
 
     rmSync(tmp, { recursive: true });
   });
+
+  it('preserves Maven namespace when scanning from saved SBOM file', async () => {
+    let capturedBody;
+    globalThis.fetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          results: [{
+            vulns: [{
+              id: 'GHSA-java-1234',
+              summary: 'Java vuln',
+              severity: [{ type: 'CVSS_V3', score: 7.5 }],
+            }],
+          }],
+        }),
+      };
+    };
+
+    const tmp = makeTmp();
+    const sbomPath = join(tmp, 'sbom.json');
+    writeFileSync(sbomPath, JSON.stringify({
+      bomFormat: 'CycloneDX',
+      metadata: { component: { name: 'java-test' } },
+      components: [{
+        name: 'guava',
+        version: '32.1.3-jre',
+        group: 'com.google.guava',
+        purl: 'pkg:maven/com.google.guava/guava@32.1.3-jre',
+        properties: [{ name: 'cdx:ecosystem', value: 'java' }],
+      }],
+    }));
+
+    const result = await sbomScanVulnerabilities({ sbom_path: sbomPath, verbosity: 'full' });
+    const output = parseResult(result);
+
+    expect(capturedBody.queries[0].package.name).toBe('com.google.guava:guava');
+    expect(output.vulnerabilities[0].affects[0].ref).toBe('pkg:maven/com.google.guava/guava@32.1.3-jre');
+
+    rmSync(tmp, { recursive: true });
+  });
 });

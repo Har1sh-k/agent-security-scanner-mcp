@@ -12,6 +12,17 @@ const ECOSYSTEM_TO_PURL_TYPE = {
   raku: 'cpan',
 };
 
+const PURL_TYPE_TO_ECOSYSTEM = {
+  npm: 'npm',
+  pypi: 'pypi',
+  gem: 'rubygems',
+  cargo: 'crates',
+  golang: 'go',
+  maven: 'java',
+  pub: 'dart',
+  cpan: 'perl',
+};
+
 /**
  * Build a Package URL string.
  * @param {string} ecosystem - Internal ecosystem name (npm, pypi, etc.)
@@ -72,4 +83,8 @@ export function parsePurl(purl) {
   };
 }
 
-export { ECOSYSTEM_TO_PURL_TYPE };
+export function ecosystemFromPurlType(type) {
+  return PURL_TYPE_TO_ECOSYSTEM[type] || type;
+}
+
+export { ECOSYSTEM_TO_PURL_TYPE, PURL_TYPE_TO_ECOSYSTEM };
