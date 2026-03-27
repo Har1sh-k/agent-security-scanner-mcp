@@ -63,6 +63,8 @@ Continue reading below for full version documentation →
 
 ---
 
+> **New in v4.1.0:** SBOM generation and dependency vulnerability analysis — generates CycloneDX v1.5 SBOMs, scans against OSV.dev for CVEs, detects hallucinated packages, compares baselines, and generates HTML audit reports. Supports 8 lock file formats and 7 manifest formats across npm, Python, Go, Rust, Ruby, and Java ecosystems. [See SBOM Tools](#-sbom--supply-chain-analysis-new-in-v410).
+>
 > **New in v4.0.0:** LLM-powered semantic code review agent with intent profiling — understands what your project is supposed to do and flags patterns that violate that intent. Same `eval()` call = safe in a build tool, dangerous in an e-commerce app. Supports Claude CLI (no API key needed!), Anthropic, and OpenAI. [See code-review-agent](#-llm-powered-code-review-agent-new-in-v400).
 >
 > **New in v3.11.0:** ClawHub ecosystem security scanning — scanned all 16,532 ClawHub skills and found 46% have critical vulnerabilities. New `scan-clawhub` CLI for batch scanning, 40+ prompt injection patterns, jailbreak detection (DAN mode, dev mode), data exfiltration checks. [See ClawHub Security Dashboard](https://www.proof-layer.com/dashboard).
@@ -87,6 +89,11 @@ Continue reading below for full version documentation →
 | `scan_skill` | Deep security scan of an OpenClaw skill: prompt injection, AST+taint code analysis, ClawHavoc malware signatures, supply chain, rug pull. Returns A-F grade | Before installing any OpenClaw skill |
 | `scanner_health` | Check plugin health: engine status, daemon status, package data availability | Diagnostics and plugin status |
 | `list_security_rules` | List available security rules and fix templates | To check rule coverage for a language |
+| `sbom_generate` | Generate CycloneDX v1.5 SBOM for a project (8 lock file formats, 7 manifest formats) | Before releases, for compliance audits |
+| `sbom_scan_vulnerabilities` | Cross-reference SBOM against OSV.dev for CVEs with severity filtering | After generating SBOM, for security audits |
+| `sbom_check_hallucinations` | Verify all SBOM packages exist in official registries | Before deploying, to catch AI-invented packages |
+| `sbom_diff` | Compare current SBOM against baseline, detect added/removed/changed packages | In CI/CD to track dependency drift |
+| `sbom_export_report` | Generate HTML or JSON audit report from SBOM with vulnerability data | For PCI-DSS compliance, security reviews |
 
 ## Quick Start
 
@@ -240,6 +247,180 @@ npx cr-agent analyze ./path/to/project -f sarif -p claude-cli
 | Prompt injection detection | `scan_agent_prompt` |
 
 📖 Full documentation: [`code-review-agent/README.md`](./code-review-agent/README.md)
+
+---
+
+## 📦 SBOM / Supply Chain Analysis (New in v4.1.0)
+
+Generate Software Bill of Materials (SBOM) and analyze dependencies for vulnerabilities across your entire supply chain.
+
+### Quick Start
+
+```bash
+# Generate SBOM for current project
+npx agent-security-scanner-mcp sbom-generate .
+
+# Scan for vulnerabilities against OSV.dev
+npx agent-security-scanner-mcp sbom-vulnerabilities .
+
+# Check for hallucinated packages
+npx agent-security-scanner-mcp sbom-check-hallucinations .
+
+# Compare against baseline (CI/CD)
+npx agent-security-scanner-mcp sbom-diff . --save-baseline  # First run
+npx agent-security-scanner-mcp sbom-diff .                  # Subsequent runs
+
+# Generate HTML audit report
+npx agent-security-scanner-mcp sbom-report . --format html
+```
+
+### Supported Ecosystems
+
+| Ecosystem | Lock Files | Manifests | CLI Fallback |
+|-----------|------------|-----------|--------------|
+| **npm** | package-lock.json (v2/v3), yarn.lock (classic/berry), pnpm-lock.yaml | package.json | `npm ls`, `pnpm list` |
+| **Python** | poetry.lock, Pipfile.lock | requirements.txt, pyproject.toml | — |
+| **Go** | go.sum | go.mod | `go list` |
+| **Rust** | Cargo.lock | — | `cargo metadata` |
+| **Ruby** | Gemfile.lock | Gemfile | — |
+| **Java** | — | pom.xml, build.gradle | `mvn dependency:tree` |
+
+### SBOM Tools
+
+#### `sbom_generate`
+
+Generate a CycloneDX v1.5 SBOM for a project. Discovers all dependencies (direct + transitive) from lock files and manifests.
+
+```json
+// Input
+{ "directory_path": "./my-project", "verbosity": "compact" }
+
+// Output
+{
+  "total_components": 212,
+  "direct": 20,
+  "dev": 91,
+  "ecosystems": ["npm", "pypi"],
+  "components": [
+    { "name": "express", "version": "4.18.2", "ecosystem": "npm", "isDirect": true }
+  ]
+}
+```
+
+#### `sbom_scan_vulnerabilities`
+
+Cross-reference SBOM components against OSV.dev vulnerability database. Returns CVE IDs, CVSS scores, severity, and fix recommendations.
+
+```json
+// Input
+{ "directory_path": "./my-project", "severity_threshold": "medium" }
+
+// Output
+{
+  "total_vulnerabilities": 3,
+  "by_severity": { "critical": 1, "high": 1, "medium": 1 },
+  "vulnerabilities": [
+    {
+      "id": "GHSA-xxxx-yyyy-zzzz",
+      "package": "lodash",
+      "severity": "critical",
+      "cvss": 9.8,
+      "fixed_version": "4.17.21"
+    }
+  ]
+}
+```
+
+#### `sbom_check_hallucinations`
+
+Check all packages in an SBOM against official registries to detect AI-invented package names.
+
+```json
+// Input
+{ "directory_path": "./my-project" }
+
+// Output
+{
+  "total_checked": 212,
+  "hallucinated_count": 1,
+  "unsupported_ecosystems": ["go", "java"],
+  "hallucinated": [
+    { "name": "react-async-utils-helper", "ecosystem": "npm" }
+  ]
+}
+```
+
+#### `sbom_diff`
+
+Compare current project SBOM against a stored baseline. Detects added, removed, and version-changed packages.
+
+```json
+// Input (first run)
+{ "directory_path": "./my-project", "save_baseline": true }
+
+// Output
+{ "message": "Baseline saved to .scanner/sbom-baseline.json" }
+
+// Input (subsequent runs)
+{ "directory_path": "./my-project" }
+
+// Output
+{
+  "added": [{ "name": "lodash", "version": "4.17.21", "ecosystem": "npm" }],
+  "removed": [],
+  "changed": [{ "name": "express", "from": "4.17.1", "to": "4.18.2" }]
+}
+```
+
+#### `sbom_export_report`
+
+Generate an HTML or JSON audit report from SBOM data, optionally enriched with vulnerability scan results.
+
+```json
+// Input
+{
+  "directory_path": "./my-project",
+  "format": "html",
+  "include_vulnerabilities": true,
+  "output_path": "./sbom-report.html"
+}
+
+// Output
+{
+  "report_path": "./sbom-report.html",
+  "components": 212,
+  "vulnerabilities": 3
+}
+```
+
+### CLI Commands
+
+```bash
+# Generate SBOM
+sbom-generate <dir> [--save] [--output <path>] [--verbosity minimal|compact|full]
+
+# Scan vulnerabilities
+sbom-vulnerabilities <dir> [--sbom-path <path>] [--verbosity minimal|compact|full]
+
+# Check hallucinations
+sbom-check-hallucinations <dir> [--verbosity minimal|compact|full]
+
+# Compare baseline
+sbom-diff <dir> [--save-baseline] [--baseline-path <path>] [--verbosity minimal|compact|full]
+
+# Generate report
+sbom-report <dir> [--format html|json] [--output <path>] [--no-vulnerabilities]
+```
+
+### Features
+
+- **CycloneDX v1.5 JSON** — Industry-standard SBOM format
+- **OSV.dev Integration** — Real-time vulnerability data with 24-hour local cache
+- **Multi-Ecosystem** — Single scan discovers dependencies across all package managers
+- **Direct vs Transitive** — Distinguishes direct dependencies from transitive ones
+- **Dev Dependencies** — Optionally include/exclude development dependencies
+- **Baseline Comparison** — Track dependency drift over time
+- **HTML Reports** — Visual dashboard with severity charts for compliance audits
 
 ---
 
@@ -1158,7 +1339,7 @@ AI coding agents introduce attack surfaces that traditional security tools weren
 |----------|-------|
 | **Transport** | stdio |
 | **Package** | `agent-security-scanner-mcp` (npm) |
-| **Tools** | 12 |
+| **Tools** | 17 |
 | **Languages** | 12 |
 | **Ecosystems** | 7 |
 | **Auth** | None required |
@@ -1239,6 +1420,22 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v4.1.0 (2026-03-27) - SBOM Generation & Vulnerability Analysis
+
+**🚀 New Feature: Software Bill of Materials (SBOM)**
+
+- **5 New MCP Tools:** `sbom_generate`, `sbom_scan_vulnerabilities`, `sbom_check_hallucinations`, `sbom_diff`, `sbom_export_report`
+- **CycloneDX v1.5:** Industry-standard SBOM format output
+- **8 Lock File Parsers:** package-lock.json (v2/v3), yarn.lock (classic/berry), pnpm-lock.yaml, poetry.lock, Pipfile.lock, Cargo.lock, go.sum, Gemfile.lock
+- **7 Manifest Parsers:** package.json, requirements.txt, pyproject.toml, go.mod, Gemfile, pom.xml, build.gradle
+- **CLI Fallbacks:** npm ls, pnpm list, cargo metadata, go list, mvn dependency:tree
+- **OSV.dev Integration:** Real-time vulnerability database with 24-hour local cache
+- **Baseline Comparison:** Track dependency drift with save/compare workflow
+- **HTML Reports:** Visual dashboard with severity charts for compliance
+- **86 New Tests:** Comprehensive coverage across all SBOM features
+
+---
 
 ### v4.0.0 (2026-03-21) - LLM-Powered Code Review Agent
 
