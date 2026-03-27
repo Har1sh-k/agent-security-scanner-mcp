@@ -23,26 +23,38 @@ export async function sbomDiff({ directory_path, baseline_path, save_baseline, v
   // Resolve baseline path
   const resolvedBaseline = baseline_path || join(directory_path, '.scanner', 'sbom-baseline.json');
 
-  // Save baseline if requested
-  if (save_baseline) {
-    atomicWrite(resolvedBaseline, JSON.stringify(currentBom, null, 2));
-  }
+  // Check if baseline exists BEFORE potentially overwriting it
+  const baselineExists = existsSync(resolvedBaseline);
 
-  // Load baseline
-  if (!existsSync(resolvedBaseline)) {
-    const msg = save_baseline
-      ? `Baseline saved to ${resolvedBaseline}. Run again to compare.`
-      : `No baseline found at ${resolvedBaseline}. Run with save_baseline=true to create one.`;
+  // If no baseline exists and save_baseline requested: save and return immediately
+  if (!baselineExists && save_baseline) {
+    atomicWrite(resolvedBaseline, JSON.stringify(currentBom, null, 2));
     return {
       content: [{
         type: 'text',
         text: JSON.stringify({
-          message: msg,
+          message: `Baseline saved to ${resolvedBaseline}. Run again to compare.`,
+          baseline_saved: resolvedBaseline,
           current: {
             total_components: componentList.metadata.total,
             ecosystems: componentList.metadata.ecosystems,
           },
-          ...(save_baseline && { baseline_saved: resolvedBaseline }),
+        }, null, 2),
+      }],
+    };
+  }
+
+  // If no baseline exists and save_baseline not requested: tell user
+  if (!baselineExists) {
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          message: `No baseline found at ${resolvedBaseline}. Run with save_baseline=true to create one.`,
+          current: {
+            total_components: componentList.metadata.total,
+            ecosystems: componentList.metadata.ecosystems,
+          },
         }, null, 2),
       }],
     };
@@ -86,6 +98,11 @@ export async function sbomDiff({ directory_path, baseline_path, save_baseline, v
     if (!currentMap.has(key)) {
       removed.push(comp);
     }
+  }
+
+  // If save_baseline requested and baseline already existed: compare first, then overwrite
+  if (save_baseline) {
+    atomicWrite(resolvedBaseline, JSON.stringify(currentBom, null, 2));
   }
 
   const level = verbosity || 'compact';

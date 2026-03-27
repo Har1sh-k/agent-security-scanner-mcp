@@ -19,6 +19,14 @@ export function parsePackageLockJson(root) {
   const packages = lock.packages || {};
   const projectPurl = `pkg:npm/${lock.name || 'root'}@${lock.version || '0.0.0'}`;
 
+  // Collect direct dependency names from the root entry
+  const rootEntry = packages[''] || {};
+  const directNames = new Set([
+    ...Object.keys(rootEntry.dependencies || {}),
+    ...Object.keys(rootEntry.devDependencies || {}),
+    ...Object.keys(rootEntry.optionalDependencies || {}),
+  ]);
+
   for (const [key, info] of Object.entries(packages)) {
     if (key === '') continue; // root entry
     // key looks like "node_modules/@scope/pkg" or "node_modules/pkg"
@@ -26,12 +34,14 @@ export function parsePackageLockJson(root) {
     if (!name || !info.version) continue;
 
     const isDev = !!info.dev || !!info.devOptional;
-    deps.push(createComponent({ name, version: info.version, ecosystem: 'npm', isDev }));
+    // A package is direct only if it appears in the root's dependency lists
+    const isDirect = directNames.has(name);
+    const comp = createComponent({ name, version: info.version, ecosystem: 'npm', isDev, isDirect });
+    deps.push(comp);
 
-    // Build edge from root to direct deps (top-level node_modules only)
-    if (!key.includes('node_modules/node_modules/')) {
-      const depPurl = `pkg:npm/${name}@${info.version}`;
-      edges.push(createEdge(projectPurl, depPurl));
+    // Build edge from root to direct deps only
+    if (isDirect) {
+      edges.push(createEdge(projectPurl, comp.purl));
     }
   }
 
@@ -267,10 +277,10 @@ export function parseManifestWithVersions(root) {
     try {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       for (const [name, ver] of Object.entries(pkg.dependencies || {})) {
-        results.push(createComponent({ name, version: ver.replace(/^[\^~>=<\s]+/, ''), ecosystem: 'npm' }));
+        results.push(createComponent({ name, version: ver.replace(/^[\^~>=<\s]+/, ''), ecosystem: 'npm', isDirect: true }));
       }
       for (const [name, ver] of Object.entries(pkg.devDependencies || {})) {
-        results.push(createComponent({ name, version: ver.replace(/^[\^~>=<\s]+/, ''), ecosystem: 'npm', isDev: true }));
+        results.push(createComponent({ name, version: ver.replace(/^[\^~>=<\s]+/, ''), ecosystem: 'npm', isDev: true, isDirect: true }));
       }
     } catch { /* skip malformed */ }
   }
@@ -289,6 +299,7 @@ export function parseManifestWithVersions(root) {
             name: match[1],
             version: (match[2] || 'unknown').split(',')[0].trim(),
             ecosystem: 'pypi',
+            isDirect: true,
           }));
         }
       }
@@ -313,6 +324,7 @@ export function parseManifestWithVersions(root) {
               name: m[1],
               version: (m[2] || 'unknown').split(',')[0].trim(),
               ecosystem: 'pypi',
+              isDirect: true,
             }));
           }
         }
@@ -329,6 +341,7 @@ export function parseManifestWithVersions(root) {
               name: m[1],
               version: m[2].replace(/^[\^~>=<\s]+/, ''),
               ecosystem: 'pypi',
+              isDirect: true,
             }));
           }
         }
@@ -345,14 +358,14 @@ export function parseManifestWithVersions(root) {
       const singleRe = /^require\s+(\S+)\s+(v[\d.]+\S*)/gm;
       let m;
       while ((m = singleRe.exec(content))) {
-        results.push(createComponent({ name: m[1], version: m[2], ecosystem: 'go' }));
+        results.push(createComponent({ name: m[1], version: m[2], ecosystem: 'go', isDirect: true }));
       }
       // Block requires
       const blockMatch = content.match(/require\s*\(([\s\S]*?)\)/g) || [];
       for (const block of blockMatch) {
         const lineRe = /^\s*(\S+)\s+(v[\d.]+\S*)/gm;
         while ((m = lineRe.exec(block))) {
-          results.push(createComponent({ name: m[1], version: m[2], ecosystem: 'go' }));
+          results.push(createComponent({ name: m[1], version: m[2], ecosystem: 'go', isDirect: true }));
         }
       }
     } catch { /* skip */ }
@@ -370,6 +383,7 @@ export function parseManifestWithVersions(root) {
           name: m[1],
           version: m[2] ? m[2].replace(/^[~>=<\s]+/, '') : 'unknown',
           ecosystem: 'rubygems',
+          isDirect: true,
         }));
       }
     } catch { /* skip */ }
@@ -388,6 +402,7 @@ export function parseManifestWithVersions(root) {
           version: m[3] || 'unknown',
           ecosystem: 'java',
           namespace: m[1],
+          isDirect: true,
         }));
       }
     } catch { /* skip */ }
@@ -409,6 +424,7 @@ export function parseManifestWithVersions(root) {
             ecosystem: 'java',
             namespace: m[1],
             isDev: m[0].startsWith('test'),
+            isDirect: true,
           }));
         }
       } catch { /* skip */ }
@@ -454,16 +470,67 @@ export function fallbackNpmLs(root) {
   }
 }
 
+export function fallbackPnpmList(root) {
+  const output = tryExec('pnpm', ['list', '--json', '--depth', 'Infinity'], root);
+  if (!output) return null;
+
+  try {
+    const data = JSON.parse(output);
+    const deps = [];
+    const seen = new Set();
+    const list = Array.isArray(data) ? data : [data];
+
+    function walk(node) {
+      for (const [name, info] of Object.entries(node.dependencies || {})) {
+        const version = info.version;
+        if (!version) continue;
+        const key = `${name}@${version}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deps.push(createComponent({ name, version, ecosystem: 'npm' }));
+        walk(info);
+      }
+    }
+    for (const entry of list) walk(entry);
+    return deps.length ? { ecosystem: 'npm', deps, edges: [] } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function fallbackCargoMetadata(root) {
-  const output = tryExec('cargo', ['metadata', '--format-version', '1', '--no-deps'], root);
+  const output = tryExec('cargo', ['metadata', '--format-version', '1'], root, 60000);
   if (!output) return null;
 
   try {
     const meta = JSON.parse(output);
-    const deps = (meta.packages || []).map(p =>
-      createComponent({ name: p.name, version: p.version, ecosystem: 'crates' })
-    );
-    return deps.length ? { ecosystem: 'crates', deps, edges: [] } : null;
+    const deps = [];
+    const edges = [];
+    const seen = new Set();
+
+    // All packages in the resolve graph
+    for (const pkg of meta.packages || []) {
+      if (seen.has(`${pkg.name}@${pkg.version}`)) continue;
+      seen.add(`${pkg.name}@${pkg.version}`);
+      deps.push(createComponent({ name: pkg.name, version: pkg.version, ecosystem: 'crates' }));
+    }
+
+    // Build dependency edges from resolve.nodes
+    if (meta.resolve && meta.resolve.nodes) {
+      for (const node of meta.resolve.nodes) {
+        const fromMatch = node.id.match(/^([^\s]+)\s+(\S+)/);
+        if (!fromMatch) continue;
+        const fromPurl = `pkg:cargo/${fromMatch[1]}@${fromMatch[2]}`;
+        for (const dep of node.deps || []) {
+          const toMatch = dep.pkg.match(/^([^\s]+)\s+(\S+)/);
+          if (toMatch) {
+            edges.push(createEdge(fromPurl, `pkg:cargo/${toMatch[1]}@${toMatch[2]}`));
+          }
+        }
+      }
+    }
+
+    return deps.length ? { ecosystem: 'crates', deps, edges } : null;
   } catch {
     return null;
   }
@@ -527,6 +594,7 @@ export function discoverDependencies(projectRoot, options = {}) {
 
   const cliFallbacks = [
     fallbackNpmLs,
+    fallbackPnpmList,
     fallbackCargoMetadata,
     fallbackGoListModules,
     fallbackMvnDependencyTree,

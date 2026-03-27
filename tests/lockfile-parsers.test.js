@@ -305,6 +305,23 @@ describe('lockfile-parsers', () => {
       rmSync(tmp, { recursive: true });
     });
 
+    it('direct count reflects manifest deps, not all non-dev packages', () => {
+      const tmp = makeTmp();
+      copyFileSync(join(fixturesDir, 'package-lock-v2.json'), join(tmp, 'package-lock.json'));
+
+      const componentList = discoverDependencies(tmp);
+      const nonDevCount = componentList.components.filter(c => !c.isDev).length;
+      const directCount = componentList.metadata.direct;
+
+      // direct should be strictly less than total (transitive deps exist)
+      expect(directCount).toBeLessThan(componentList.metadata.total);
+      // v2 fixture: express + lodash (non-dev direct) + mocha (dev direct) = 3
+      // body-parser and accepts are transitive (not direct)
+      expect(directCount).toBe(3);
+
+      rmSync(tmp, { recursive: true });
+    });
+
     it('returns empty component list for empty directory', () => {
       const tmp = makeTmp();
 

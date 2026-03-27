@@ -5,16 +5,17 @@ import { buildPurl } from './purl.js';
 
 /**
  * Create a normalized component.
- * @param {{ name: string, version?: string, ecosystem: string, isDev?: boolean, scope?: string, namespace?: string }} opts
- * @returns {{ name: string, version: string, ecosystem: string, isDev: boolean, scope: string, purl: string, namespace?: string }}
+ * @param {{ name: string, version?: string, ecosystem: string, isDev?: boolean, isDirect?: boolean, scope?: string, namespace?: string }} opts
+ * @returns {{ name: string, version: string, ecosystem: string, isDev: boolean, isDirect: boolean, scope: string, purl: string, namespace?: string }}
  */
-export function createComponent({ name, version, ecosystem, isDev = false, scope = 'required', namespace }) {
+export function createComponent({ name, version, ecosystem, isDev = false, isDirect = false, scope, namespace }) {
   return {
     name,
     version: version || 'unknown',
     ecosystem,
     isDev,
-    scope: isDev ? 'optional' : scope,
+    isDirect,
+    scope: scope || (isDev ? 'optional' : 'required'),
     purl: buildPurl(ecosystem, name, version, namespace),
     ...(namespace && { namespace }),
   };
@@ -47,7 +48,7 @@ export function createComponentList(components = [], edges = [], metadata = {}) 
       version: metadata.version || '0.0.0',
       ecosystems,
       total: components.length,
-      direct: components.filter(c => c.scope === 'required' && !c.isDev).length,
+      direct: components.filter(c => c.isDirect).length,
       dev: components.filter(c => c.isDev).length,
       ...metadata,
     },

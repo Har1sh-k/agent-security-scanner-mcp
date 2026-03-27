@@ -11,10 +11,11 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
  * Query OSV.dev for vulnerabilities affecting a list of packages.
+ * Accepts normalized components (with purl, namespace) to avoid lossy flattening.
  * Uses local cache to avoid redundant network calls.
- * @param {Array<{ name: string, version: string, ecosystem: string }>} packages
+ * @param {Array<{ name: string, version: string, ecosystem: string, purl?: string, namespace?: string }>} packages
  * @param {{ cacheDir?: string }} [options={}]
- * @returns {Promise<Map<string, object[]>>} Map of purl → vulnerability list
+ * @returns {Promise<Map<string, object[]>>} Map of cacheKey → vulnerability list
  */
 export async function queryBatch(packages, options = {}) {
   const { cacheDir } = options;
@@ -50,7 +51,8 @@ export async function queryBatch(packages, options = {}) {
     const chunk = uncached.slice(i, i + BATCH_SIZE);
     const queries = chunk.map(pkg => ({
       package: {
-        name: pkg.name,
+        name: pkg.ecosystem === 'java' && pkg.namespace
+          ? `${pkg.namespace}:${pkg.name}` : pkg.name,
         ecosystem: ecosystemMap[pkg.ecosystem] || pkg.ecosystem,
       },
       version: pkg.version,
@@ -125,7 +127,7 @@ function mapOsvVulnerability(osvEntry, pkg) {
     }],
     description: osvEntry.summary || osvEntry.details || '',
     affects: [{
-      ref: `pkg:${pkg.ecosystem}/${pkg.name}@${pkg.version}`,
+      ref: pkg.purl || `pkg:${pkg.ecosystem}/${pkg.name}@${pkg.version}`,
     }],
     ...(fixedVersion && {
       recommendation: `Upgrade to ${fixedVersion}`,

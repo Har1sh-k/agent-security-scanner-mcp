@@ -42,12 +42,9 @@ export async function sbomScanVulnerabilities({ directory_path, sbom_path, sever
     projectName = componentList.metadata.name;
   }
 
-  // Query OSV
+  // Query OSV — pass normalized components to preserve purl and namespace
   const cacheDir = directory_path ? join(directory_path, '.scanner', 'cache', 'vuln') : null;
-  const results = await queryBatch(
-    components.map(c => ({ name: c.name, version: c.version, ecosystem: c.ecosystem })),
-    { cacheDir }
-  );
+  const results = await queryBatch(components, { cacheDir });
 
   // Flatten and apply severity filter
   const threshold = severity_threshold || 'low';

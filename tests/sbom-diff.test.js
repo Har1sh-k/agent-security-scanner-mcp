@@ -87,6 +87,25 @@ describe('sbom-diff', () => {
     expect(output.error).toBeDefined();
   });
 
+  it('first-run save_baseline returns save message, not zero-diff', async () => {
+    const tmp = makeTmp();
+    copyFileSync(join(fixturesDir, 'package-lock-v2.json'), join(tmp, 'package-lock.json'));
+
+    const result = await sbomDiff({ directory_path: tmp, save_baseline: true });
+    const output = parseResult(result);
+
+    // Should return a save message, not a diff result
+    expect(output.message).toContain('Baseline saved');
+    expect(output.message).toContain('Run again to compare');
+    expect(output.baseline_saved).toBeDefined();
+    // Should NOT have diff fields
+    expect(output.added).toBeUndefined();
+    expect(output.unchanged).toBeUndefined();
+    expect(output.summary).toBeUndefined();
+
+    rmSync(tmp, { recursive: true });
+  });
+
   it('supports custom baseline_path', async () => {
     const tmp = makeTmp();
     copyFileSync(join(fixturesDir, 'package-lock-v2.json'), join(tmp, 'package-lock.json'));
