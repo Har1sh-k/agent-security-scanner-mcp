@@ -51,7 +51,8 @@
       ],
       "evaluation": {
         "evidence_checks": [
-          { "path": "supply_chain.hallucinations.hallucinated_count", "operator": "eq", "value": 0, "on_fail": "fail", "reason": "Hallucinated (phantom) packages detected in dependency tree" }
+          { "path": "supply_chain.hallucinations.hallucinated_count", "operator": "eq", "value": 0, "on_fail": "fail", "reason": "Hallucinated (phantom) packages detected in dependency tree" },
+          { "path": "supply_chain.hallucinations.legitimate_count", "operator": "gte", "value": 1, "on_fail": "not_evaluated", "not_evaluated_reason": "No packages could be verified — all ecosystems unsupported by hallucination checker", "default": 0 }
         ]
       }
     },
@@ -139,7 +140,7 @@
       ],
       "evaluation": {
         "evidence_checks": [
-          { "path": "supply_chain.drift.baseline_exists", "operator": "eq", "value": true, "on_fail": "not_evaluated", "reason": "No SBOM baseline — dependency drift cannot be evaluated" }
+          { "path": "supply_chain.drift.baseline_exists", "operator": "eq", "value": true, "on_fail": "not_evaluated", "not_evaluated_reason": "No SBOM baseline — dependency drift cannot be evaluated" }
         ]
       }
     }

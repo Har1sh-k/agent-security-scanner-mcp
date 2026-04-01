@@ -28,16 +28,68 @@ export function resolvePath(obj, path) {
 function runEvidenceCheck(check, evidenceBundle) {
   const value = resolvePath(evidenceBundle, check.path);
 
-  // Missing evidence: use default if provided, otherwise not_evaluated
+  // Missing evidence handling — three tiers:
+  //
+  // 1. Any node along the path is explicitly `null` → source failure → not_evaluated.
+  //    The evidence collector sets sections to null when a data source fails (e.g., OSV down).
+  //
+  // 2. A top-level section key is missing entirely (e.g., bundle has no "supply_chain") →
+  //    evidence was never collected → not_evaluated. Defaults must not mask this.
+  //
+  // 3. A deeper leaf is missing but its parent exists (e.g., scan.by_category_severity.crypto
+  //    is absent because no crypto findings) → safe to apply check.default.
+  //
   if (value === undefined || value === null) {
+    const segments = check.path.split('.');
+
+    // Walk the path to find where it breaks
+    let current = evidenceBundle;
+    let depth = 0;
+    for (depth = 0; depth < segments.length; depth++) {
+      if (current === null) {
+        // Explicit null — source failure
+        const failedAt = segments.slice(0, depth).join('.') || segments[0];
+        return {
+          passed: false,
+          status: 'not_evaluated',
+          reason: `Evidence source unavailable: ${failedAt} is null (full path: ${check.path})`,
+        };
+      }
+      if (current === undefined || typeof current !== 'object') break;
+      const next = current[segments[depth]];
+      if (next === null) {
+        // Explicit null at this level
+        const failedAt = segments.slice(0, depth + 1).join('.');
+        return {
+          passed: false,
+          status: 'not_evaluated',
+          reason: `Evidence source unavailable: ${failedAt} is null (full path: ${check.path})`,
+        };
+      }
+      if (next === undefined) break; // missing key — check depth below
+      current = next;
+    }
+
+    // If the break happened at depth 0 or 1, the top-level section is missing.
+    // This means evidence was never collected — not_evaluated, no defaults.
+    if (depth <= 1) {
+      return {
+        passed: false,
+        status: 'not_evaluated',
+        reason: `Evidence source unavailable: ${segments[0]} is missing (full path: ${check.path})`,
+      };
+    }
+
+    // Break happened deeper — parent section exists, leaf key absent.
+    // Safe to apply default (e.g., scan ran but no "crypto" category).
     if (check.default !== undefined) {
-      // Use the default value and evaluate against it
       return evaluateOp(check.operator, check.default, check.value, check);
     }
+
     return {
       passed: false,
       status: 'not_evaluated',
-      reason: check.reason || `Missing evidence at path: ${check.path}`,
+      reason: `Missing evidence at path: ${check.path}`,
     };
   }
 
@@ -66,11 +118,15 @@ function evaluateOp(operator, actual, expected, check) {
   if (passed) {
     return { passed: true, status: null, reason: '' };
   }
-  return {
-    passed: false,
-    status: check.on_fail || 'fail',
-    reason: check.reason || `Check failed: ${check.path} ${operator} ${expected} (actual: ${actual})`,
-  };
+
+  const status = check.on_fail || 'fail';
+  // Use distinct reason for not_evaluated vs failure to avoid confusing audit consumers.
+  // "reason" is the failure message; "not_evaluated_reason" explains why evidence was insufficient.
+  const reason = status === 'not_evaluated'
+    ? (check.not_evaluated_reason || `Evidence insufficient: ${check.path} ${operator} ${expected} (actual: ${actual})`)
+    : (check.reason || `Check failed: ${check.path} ${operator} ${expected} (actual: ${actual})`);
+
+  return { passed: false, status, reason };
 }
 
 /**

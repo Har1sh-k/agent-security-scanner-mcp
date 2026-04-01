@@ -103,7 +103,8 @@
       ],
       "evaluation": {
         "evidence_checks": [
-          { "path": "supply_chain.hallucinations.hallucinated_count", "operator": "eq", "value": 0, "on_fail": "fail", "reason": "Hallucinated (phantom) packages detected — supply chain integrity risk" }
+          { "path": "supply_chain.hallucinations.hallucinated_count", "operator": "eq", "value": 0, "on_fail": "fail", "reason": "Hallucinated (phantom) packages detected — supply chain integrity risk" },
+          { "path": "supply_chain.hallucinations.legitimate_count", "operator": "gte", "value": 1, "on_fail": "not_evaluated", "not_evaluated_reason": "No packages could be verified — all ecosystems unsupported by hallucination checker", "default": 0 }
         ]
       }
     }

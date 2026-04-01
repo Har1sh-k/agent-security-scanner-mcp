@@ -67,7 +67,11 @@ export async function collectEvidence({ directory, sbomPath, baselinePath, toolV
   let componentList = null;
   let bom = null;
   try {
-    if (sbomPath && existsSync(sbomPath)) {
+    if (sbomPath) {
+      // Explicit sbom_path: error if it doesn't exist (don't silently fall through)
+      if (!existsSync(sbomPath)) {
+        throw new Error(`SBOM file not found: ${sbomPath}`);
+      }
       bom = JSON.parse(readFileSync(sbomPath, 'utf-8'));
       components = (bom.components || []).map(componentFromBomComponent);
     } else if (existsSync(directory)) {
@@ -226,6 +230,7 @@ export async function collectEvidence({ directory, sbomPath, baselinePath, toolV
       hallucinations: hallucinationData ? {
         hallucinated_count: hallucinationData.hallucinated_count,
         unsupported_count: hallucinationData.unsupported_count,
+        legitimate_count: hallucinationData.legitimate_count,
         hallucinated_packages: hallucinationData.hallucinated_packages,
         unsupported_packages: hallucinationData.unsupported_packages,
       } : null,

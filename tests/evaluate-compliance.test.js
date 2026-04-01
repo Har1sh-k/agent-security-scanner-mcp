@@ -294,26 +294,38 @@ describe('evidence_checks evaluation', () => {
     expect(result.status).toBe('not_evaluated');
   });
 
-  it('uses default when evidence path missing but default provided', () => {
+  it('not_evaluated when entire section is null even with default (source failure)', () => {
     const control = makeControl([
       { path: 'supply_chain.vulnerabilities.by_severity.critical', operator: 'lte', value: 0, on_fail: 'fail', reason: 'Critical vulns', default: 0 },
     ]);
-    const bundle = {}; // no supply_chain data
+    // Section entirely missing — source failed, default must NOT mask this
+    const bundle = {};
+    const result = evaluateControl(control, baseEvidence, bundle);
+    expect(result.status).toBe('not_evaluated');
+    expect(result.reasons[0]).toContain('Evidence source unavailable');
+  });
+
+  it('uses default when section exists but leaf key is absent', () => {
+    const control = makeControl([
+      { path: 'scan.by_category_severity.crypto.CRITICAL', operator: 'lte', value: 0, on_fail: 'fail', reason: 'Critical crypto', default: 0 },
+    ]);
+    // scan section exists, but crypto category not present — safe to use default
+    const bundle = { scan: { by_category_severity: {} } };
     const result = evaluateControl(control, baseEvidence, bundle);
     expect(result.status).toBe('pass'); // default 0 <= 0
   });
 
   it('eq check with boolean works', () => {
     const control = makeControl([
-      { path: 'supply_chain.drift.baseline_exists', operator: 'eq', value: true, on_fail: 'not_evaluated', reason: 'No baseline' },
+      { path: 'supply_chain.drift.baseline_exists', operator: 'eq', value: true, on_fail: 'not_evaluated', not_evaluated_reason: 'No baseline' },
     ]);
     // Baseline exists
     const result1 = evaluateControl(control, baseEvidence, { supply_chain: { drift: { baseline_exists: true } } });
     expect(result1.status).toBe('pass');
-    // Baseline does not exist
+    // Baseline does not exist — uses not_evaluated_reason, not failure reason
     const result2 = evaluateControl(control, baseEvidence, { supply_chain: { drift: { baseline_exists: false } } });
     expect(result2.status).toBe('not_evaluated');
-    expect(result2.reasons).toContain('No baseline');
+    expect(result2.reasons[0]).toBe('No baseline');
   });
 
   it('exists check works', () => {
@@ -344,6 +356,83 @@ describe('evidence_checks evaluation', () => {
     // No evidenceBundle passed → evidence_checks skipped
     const result = evaluateControl(control, baseEvidence);
     expect(result.status).toBe('pass');
+  });
+});
+
+// ============================================================
+// Regression tests for review findings
+// ============================================================
+describe('review finding fixes', () => {
+  const baseEvidence = { findings: [], grades: {}, toolsRun: [] };
+
+  it('F1: null scan section → not_evaluated, not pass (even with defaults)', () => {
+    // Simulates OSV outage: supply_chain.vulnerabilities is null
+    const controls = loadControls('soc2-technical').controls;
+    const legacyEvidence = { findings: [], grades: {}, toolsRun: [] };
+    const bundle = {
+      scan: null, // scan source failed
+      sbom: { component_count: 10 },
+      supply_chain: {
+        vulnerabilities: null, // OSV outage
+        hallucinations: { hallucinated_count: 0, legitimate_count: 5 },
+        drift: { baseline_exists: true },
+      },
+    };
+    const result = evaluateAll(controls, legacyEvidence, bundle);
+
+    // SOC2-T002 (vulns) must NOT pass — source failed
+    const t002 = result.results.find(r => r.control_id === 'SOC2-T002');
+    expect(t002.status).toBe('not_evaluated');
+
+    // SOC2-T004 (code findings) must NOT pass — scan is null
+    const t004 = result.results.find(r => r.control_id === 'SOC2-T004');
+    expect(t004.status).toBe('not_evaluated');
+
+    // SOC2-T005 (exfiltration) must NOT pass — scan is null
+    const t005 = result.results.find(r => r.control_id === 'SOC2-T005');
+    expect(t005.status).toBe('not_evaluated');
+  });
+
+  it('F2: hallucination control is not_evaluated when all ecosystems unsupported', () => {
+    const controls = loadControls('soc2-technical').controls;
+    const legacyEvidence = { findings: [], grades: {}, toolsRun: [] };
+    const bundle = {
+      sbom: { component_count: 5 },
+      supply_chain: {
+        hallucinations: {
+          hallucinated_count: 0,
+          unsupported_count: 5,
+          legitimate_count: 0, // no ecosystems could be verified
+          hallucinated_packages: [],
+          unsupported_packages: [],
+        },
+      },
+    };
+    const result = evaluateAll(controls, legacyEvidence, bundle);
+    const t003 = result.results.find(r => r.control_id === 'SOC2-T003');
+    expect(t003.status).toBe('not_evaluated');
+    expect(t003.reasons.some(r => r.includes('unsupported'))).toBe(true);
+  });
+
+  it('F4: not_evaluated uses distinct reason, not failure reason', () => {
+    const makeControl = (checks) => ({
+      id: 'TEST', title: 'Test', domain: 'security', scanner_tools: [],
+      evaluation: { evidence_checks: checks },
+    });
+    const control = makeControl([{
+      path: 'supply_chain.drift.baseline_exists',
+      operator: 'eq',
+      value: true,
+      on_fail: 'not_evaluated',
+      reason: 'Drift check failed — baseline diverged',
+      not_evaluated_reason: 'No SBOM baseline available for comparison',
+    }]);
+    const bundle = { supply_chain: { drift: { baseline_exists: false } } };
+    const result = evaluateControl(control, baseEvidence, bundle);
+    expect(result.status).toBe('not_evaluated');
+    // Should use not_evaluated_reason, NOT the failure reason
+    expect(result.reasons[0]).toBe('No SBOM baseline available for comparison');
+    expect(result.reasons[0]).not.toContain('diverged');
   });
 });
 
@@ -417,7 +506,7 @@ describe('SOC2-Technical evaluation', () => {
       sbom: { component_count: 10 },
       supply_chain: {
         vulnerabilities: { by_severity: { critical: 0, high: 0, medium: 0, low: 0 } },
-        hallucinations: { hallucinated_count: 0 },
+        hallucinations: { hallucinated_count: 0, legitimate_count: 5 },
         drift: { baseline_exists: true },
       },
     };
@@ -439,7 +528,7 @@ describe('GDPR-Technical evaluation', () => {
       sbom: { component_count: 5 },
       supply_chain: {
         vulnerabilities: { by_severity: { critical: 0, high: 0 } },
-        hallucinations: { hallucinated_count: 0 },
+        hallucinations: { hallucinated_count: 0, legitimate_count: 3 },
       },
     };
     const result = evaluateAll(controls, legacyEvidence, bundle);
