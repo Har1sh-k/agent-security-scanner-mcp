@@ -144,6 +144,15 @@ export function validateRegistry(data) {
             if (!check.on_fail || !['fail', 'partial', 'not_evaluated'].includes(check.on_fail)) {
               errors.push(`${prefix}: on_fail must be "fail", "partial", or "not_evaluated"`);
             }
+            if (check.not_evaluated_reason !== undefined && typeof check.not_evaluated_reason !== 'string') {
+              errors.push(`${prefix}: not_evaluated_reason must be a string`);
+            }
+            if (check.reason !== undefined && typeof check.reason !== 'string') {
+              errors.push(`${prefix}: reason must be a string`);
+            }
+            if (check.default !== undefined && typeof check.default !== 'number' && typeof check.default !== 'boolean') {
+              errors.push(`${prefix}: default must be a number or boolean`);
+            }
           }
         }
       }

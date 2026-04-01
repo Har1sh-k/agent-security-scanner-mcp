@@ -179,6 +179,48 @@ describe('validateRegistry with new features', () => {
     expect(errors).toHaveLength(0);
   });
 
+  it('rejects non-string not_evaluated_reason', () => {
+    const data = {
+      domains: ['security'],
+      controls: [{
+        id: 'T001', title: 'Test', domain: 'security',
+        evaluation: {
+          evidence_checks: [{ path: 'a.b', operator: 'eq', value: 0, on_fail: 'not_evaluated', not_evaluated_reason: 123 }],
+        },
+      }],
+    };
+    const errors = validateRegistry(data);
+    expect(errors.some(e => e.includes('not_evaluated_reason must be a string'))).toBe(true);
+  });
+
+  it('rejects non-string reason', () => {
+    const data = {
+      domains: ['security'],
+      controls: [{
+        id: 'T001', title: 'Test', domain: 'security',
+        evaluation: {
+          evidence_checks: [{ path: 'a.b', operator: 'eq', value: 0, on_fail: 'fail', reason: true }],
+        },
+      }],
+    };
+    const errors = validateRegistry(data);
+    expect(errors.some(e => e.includes('reason must be a string'))).toBe(true);
+  });
+
+  it('rejects non-number/boolean default', () => {
+    const data = {
+      domains: ['security'],
+      controls: [{
+        id: 'T001', title: 'Test', domain: 'security',
+        evaluation: {
+          evidence_checks: [{ path: 'a.b', operator: 'eq', value: 0, on_fail: 'fail', default: 'zero' }],
+        },
+      }],
+    };
+    const errors = validateRegistry(data);
+    expect(errors.some(e => e.includes('default must be a number or boolean'))).toBe(true);
+  });
+
   it('validates references as string array', () => {
     const data = {
       domains: ['security'],
