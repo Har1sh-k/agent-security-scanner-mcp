@@ -33,6 +33,7 @@ import { sbomVulnerabilitiesSchema, sbomScanVulnerabilities } from './src/tools/
 import { sbomHallucinationsSchema, sbomCheckHallucinations } from './src/tools/sbom-hallucinations.js';
 import { sbomDiffSchema, sbomDiff } from './src/tools/sbom-diff.js';
 import { sbomReportSchema, sbomExportReport } from './src/tools/sbom-report.js';
+import { evaluateComplianceSchema, evaluateCompliance } from './src/tools/evaluate-compliance.js';
 
 // Handle both ESM and CJS bundling (Smithery bundles to CJS)
 let __dirname;
@@ -252,9 +253,16 @@ server.tool(
 
 server.tool(
   "get_compliance_controls",
-  "Look up AIUC-1 compliance controls with evaluation criteria. Filter by domain (security/safety), control IDs, or OWASP LLM tags. Returns structured evaluation rules for pass/partial/fail assessment.",
+  "Look up compliance controls with evaluation criteria. Supports multiple frameworks: aiuc-1 (default), soc2-technical, gdpr-technical. Filter by domain, control IDs, or OWASP LLM tags.",
   complianceControlsSchema,
   getComplianceControls
+);
+
+server.tool(
+  "evaluate_compliance",
+  "Evaluate a project against compliance frameworks (SOC2-technical, GDPR-technical, AIUC-1). Collects evidence from code scans, SBOM, vulnerability checks, and hallucination detection, then evaluates controls. Optionally saves timestamped evidence bundle.",
+  evaluateComplianceSchema,
+  evaluateCompliance
 );
 
 // ===========================================
