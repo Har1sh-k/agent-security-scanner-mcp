@@ -63,6 +63,8 @@ Continue reading below for full version documentation →
 
 ---
 
+> **New in v4.2.0:** Compliance evidence collection — evaluate projects against SOC2-Technical (8 controls) and GDPR-Technical (6 controls) frameworks. Collects evidence from code scans, SBOM, vulnerability checks, and hallucination detection, then evaluates controls with pass/partial/fail/not_evaluated status. Supports evidence persistence for audit trails. [See Compliance Evaluation](#-compliance-evaluation-new-in-v420).
+>
 > **New in v4.1.0:** SBOM generation and dependency vulnerability analysis — generates CycloneDX v1.5 SBOMs, scans against OSV.dev for CVEs, detects hallucinated packages, compares baselines, and generates HTML audit reports. Supports 8 lock file formats and 7 manifest formats across npm, Python, Go, Rust, Ruby, and Java ecosystems. [See SBOM Tools](#-sbom--supply-chain-analysis-new-in-v410).
 >
 > **New in v4.0.0:** LLM-powered semantic code review agent with intent profiling — understands what your project is supposed to do and flags patterns that violate that intent. Same `eval()` call = safe in a build tool, dangerous in an e-commerce app. Supports Claude CLI (no API key needed!), Anthropic, and OpenAI. [See code-review-agent](#-llm-powered-code-review-agent-new-in-v400).
@@ -94,6 +96,8 @@ Continue reading below for full version documentation →
 | `sbom_check_hallucinations` | Verify all SBOM packages exist in official registries | Before deploying, to catch AI-invented packages |
 | `sbom_diff` | Compare current SBOM against baseline, detect added/removed/changed packages | In CI/CD to track dependency drift |
 | `sbom_export_report` | Generate HTML or JSON audit report from SBOM with vulnerability data | For PCI-DSS compliance, security reviews |
+| `get_compliance_controls` | Look up compliance controls with evaluation criteria (AIUC-1, SOC2, GDPR) | To understand compliance requirements |
+| `evaluate_compliance` | Evaluate project against compliance frameworks with evidence collection | For SOC2/GDPR technical compliance audits |
 
 ## Quick Start
 
@@ -421,6 +425,177 @@ sbom-report <dir> [--format html|json] [--output <path>] [--no-vulnerabilities]
 - **Dev Dependencies** — Optionally include/exclude development dependencies
 - **Baseline Comparison** — Track dependency drift over time
 - **HTML Reports** — Visual dashboard with severity charts for compliance audits
+
+---
+
+## 📋 Compliance Evaluation (New in v4.2.0)
+
+Evaluate projects against technical compliance frameworks with automated evidence collection from code scans, SBOM, vulnerability checks, and hallucination detection.
+
+### Quick Start
+
+```bash
+# Evaluate against SOC2 technical controls
+npx agent-security-scanner-mcp evaluate-compliance . --framework soc2-technical
+
+# Evaluate against GDPR technical controls
+npx agent-security-scanner-mcp evaluate-compliance . --framework gdpr-technical
+
+# Evaluate with evidence persistence (for audit trails)
+npx agent-security-scanner-mcp evaluate-compliance . --framework soc2-technical --save-evidence
+
+# List available compliance frameworks
+npx agent-security-scanner-mcp get-compliance-controls --verbosity full
+```
+
+### Supported Frameworks
+
+| Framework | Controls | Focus Areas |
+|-----------|----------|-------------|
+| **AIUC-1** | 16 | AI agent security, prompt injection, hallucination |
+| **SOC2-Technical** | 8 | Supply chain, code security, crypto, auth, drift |
+| **GDPR-Technical** | 6 | Data privacy, encryption, third-party risks |
+
+> **Note:** These are technical controls only. SOC2-Technical does not cover organizational, administrative, or physical SOC 2 controls. GDPR-Technical does not cover DPIAs, data subject rights, or processor contracts.
+
+### SOC2-Technical Controls
+
+| Control ID | Title | What It Checks |
+|------------|-------|----------------|
+| SOC2-T001 | Software dependency inventory exists | SBOM has ≥1 component |
+| SOC2-T002 | No critical dependency vulnerabilities | OSV.dev scan for critical/high CVEs |
+| SOC2-T003 | No hallucinated packages | Package registry verification |
+| SOC2-T004 | No critical code security findings | Static analysis for injection, deserialization |
+| SOC2-T005 | Data exfiltration/exposure below threshold | Exfiltration patterns, info-exposure scan |
+| SOC2-T006 | Cryptographic controls adequate | Weak algorithms, hardcoded keys |
+| SOC2-T007 | Authentication/authorization adequate | Auth bypass, permissions issues |
+| SOC2-T008 | Dependency drift tracked | SBOM baseline comparison |
+
+### GDPR-Technical Controls
+
+| Control ID | Title | What It Checks |
+|------------|-------|----------------|
+| GDPR-T001 | Sensitive data exposure below threshold | PII patterns, secrets, logging |
+| GDPR-T002 | Data exfiltration below threshold | External data transfer patterns |
+| GDPR-T003 | Encryption/transport adequate | Weak crypto, plaintext transport |
+| GDPR-T004 | Third-party dependency inventory | SBOM component count |
+| GDPR-T005 | No critical third-party vulnerabilities | OSV.dev vulnerability scan |
+| GDPR-T006 | No hallucinated packages | Registry verification |
+
+### MCP Tools
+
+#### `get_compliance_controls`
+
+Look up compliance controls with evaluation criteria. Filter by framework, domain, or OWASP LLM tags.
+
+```json
+// Input
+{ "framework": "soc2-technical", "domain": "supply-chain", "verbosity": "compact" }
+
+// Output
+{
+  "framework": "SOC2-Technical",
+  "controls_count": 4,
+  "controls": [
+    {
+      "id": "SOC2-T001",
+      "title": "Software dependency inventory exists",
+      "domain": "supply-chain",
+      "references": ["CC6.6", "CC7.1"],
+      "scanner_tools": ["sbom_generate"],
+      "evaluation": { "evidence_checks": [...] }
+    }
+  ]
+}
+```
+
+#### `evaluate_compliance`
+
+Evaluate a project against compliance frameworks. Collects evidence from multiple sources, evaluates each control, and optionally saves timestamped evidence bundles.
+
+```json
+// Input
+{
+  "directory_path": "./my-project",
+  "frameworks": ["soc2-technical", "gdpr-technical"],
+  "save_evidence": true,
+  "verbosity": "compact"
+}
+
+// Output
+{
+  "directory": "./my-project",
+  "tools_run": ["scan_project", "scan_security", "sbom_generate", "sbom_scan_vulnerabilities", "sbom_check_hallucinations"],
+  "scan_summary": { "grade": "B", "by_severity": { "CRITICAL": 0, "HIGH": 2, "MEDIUM": 5 } },
+  "sbom_summary": { "component_count": 212, "ecosystems": ["npm", "pypi"] },
+  "supply_chain": {
+    "vulnerabilities": { "total": 3, "by_severity": { "critical": 0, "high": 1, "medium": 2 } },
+    "hallucinations": { "hallucinated_count": 0 },
+    "drift": { "baseline_exists": true, "added": 2, "removed": 0 }
+  },
+  "compliance": {
+    "soc2-technical": {
+      "pass": 6, "partial": 1, "fail": 0, "not_evaluated": 1,
+      "results": [
+        { "control_id": "SOC2-T001", "status": "pass", "reasons": [] },
+        { "control_id": "SOC2-T002", "status": "partial", "reasons": ["High-severity dependency vulnerabilities exceed threshold"] }
+      ]
+    }
+  },
+  "evidence_saved": ".scanner/evidence/2026-04-02T05-30-00-soc2-technical.json"
+}
+```
+
+### Evidence Collection
+
+The `evaluate_compliance` tool collects evidence from multiple sources:
+
+| Source | Tools Used | Evidence Collected |
+|--------|------------|-------------------|
+| Code Scan | `scan_project`, `scan_security` | Security grade, findings by severity/category |
+| SBOM | `sbom_generate` | Component count, ecosystems, direct vs transitive |
+| Vulnerabilities | `sbom_scan_vulnerabilities` | CVE counts by severity |
+| Hallucinations | `sbom_check_hallucinations` | Hallucinated package count |
+| Drift | `sbom_diff` | Added/removed/changed packages vs baseline |
+
+### Evidence Persistence
+
+When `save_evidence: true`, the tool saves timestamped JSON evidence bundles to `.scanner/evidence/`:
+
+```
+.scanner/evidence/
+├── 2026-04-02T05-30-00-soc2-technical.json
+├── 2026-04-02T05-35-00-gdpr-technical.json
+└── ...
+```
+
+These bundles contain complete evidence data for audit trails and compliance documentation.
+
+### Control Evaluation Logic
+
+Controls use a path-based evidence check system with operators:
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `exists` | Path value is present and non-null | `sbom.component_count exists` |
+| `eq` | Exact equality | `drift.baseline_exists eq true` |
+| `lte` | Less than or equal | `vulnerabilities.critical lte 0` |
+| `gte` | Greater than or equal | `sbom.component_count gte 1` |
+
+**Three-tier null handling:**
+1. **Explicit null** (e.g., OSV outage) → `not_evaluated` — source failure
+2. **Missing top-level section** → `not_evaluated` — evidence never collected
+3. **Missing leaf key** → use `default` value if specified (e.g., no crypto findings = 0)
+
+### CLI Commands
+
+```bash
+# Evaluate compliance
+evaluate-compliance <dir> [--framework <name>] [--save-evidence] [--verbosity minimal|compact|full]
+
+# List controls
+get-compliance-controls [--framework <name>] [--domain <name>] [--verbosity minimal|compact|full]
+```
 
 ---
 
@@ -1420,6 +1595,27 @@ All MCP tools support a `verbosity` parameter to minimize context window consump
 ---
 
 ## Changelog
+
+### v4.2.0 (2026-04-02) - Compliance Evidence Collection
+
+**🚀 New Feature: SOC2/GDPR Technical Compliance Evaluation**
+
+- **2 New MCP Tools:** `evaluate_compliance`, `get_compliance_controls` (enhanced)
+- **SOC2-Technical Framework:** 8 controls covering dependency inventory, vulnerabilities, hallucinations, code findings, exfiltration, crypto, auth, drift
+- **GDPR-Technical Framework:** 6 controls covering data exposure, exfiltration, encryption, dependency inventory, vulnerabilities, hallucinations
+- **Multi-Framework Registry:** Generalized loader supporting per-framework domain validation
+- **Evidence Collection:** Automated evidence gathering from code scans, SBOM, OSV.dev, hallucination checks
+- **Evidence Persistence:** Timestamped JSON bundles saved to `.scanner/evidence/` for audit trails
+- **Generic evidence_checks Evaluator:** Path-based check system with `exists`/`eq`/`lte`/`gte` operators
+- **Three-Tier Null Handling:** Distinguishes source failures (null) from absent categories (undefined)
+- **48 New Tests:** Comprehensive coverage for multi-framework loading, evidence checks, SOC2/GDPR evaluation
+
+**Design Notes:**
+- Technical controls only — does not claim full SOC 2 or GDPR compliance
+- Missing evidence → `not_evaluated`, not false pass (secure default)
+- AIUC-1 backward compatibility maintained (zero regression)
+
+---
 
 ### v4.1.0 (2026-03-27) - SBOM Generation & Vulnerability Analysis
 
